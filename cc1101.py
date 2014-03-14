@@ -349,7 +349,7 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         }
-# levolo switch, when send: WriteReg('PKTLEN',0x40)
+
     RF_SETTINGS4 = {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
