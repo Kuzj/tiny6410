@@ -66,7 +66,7 @@ class sock_thread_out(threading.Thread):
 
     def run(self):
         while 1:
-            data=mod0.Receive(1100)
+            data=mod0.Receive(1000)
             try:
                 sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 sock.connect(SOCKFILE_OUT)
