@@ -880,7 +880,8 @@ class cc1101:
             sum_bytes=0
             print 'start...'
             events=self.epoll_obj.poll()
-            print('RSSI: '+self.ReadStatus('RSSI')[1])
+            self.RSSI=self.ReadStatus('RSSI')[1]
+            print('RSSI: '+self.RSSI)
             while True:
                 bytes=int(self.ReadStatus('RXBYTES')[1],16)
                 if sum_bytes+bytes>=packet_len:

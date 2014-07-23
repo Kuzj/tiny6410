@@ -112,8 +112,8 @@ if __name__ == "__main__":
                 try:
                     os.remove(SOCKFILE)
                     mod0=cc1101(0)
-                    mod1=cc1101(1)
                     mod0.Close()
+                    mod1=cc1101(1)
                     mod1.Close()
                 except OSError:
                     pass
