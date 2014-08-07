@@ -6,6 +6,7 @@ import operator
 import fagpio
 import select
 import math
+import re
 
 class cc1101:
     #------------------------------------------------------------------------------------------------------
@@ -133,36 +134,6 @@ class cc1101:
     WRITE_BURST=0x40
     READ_SINGLE=0x80
     READ_BURST=0xC0
-
-    # FREQ_433_CC1101
-    # Chipcon
-    # Product = CC1101
-    # Chip version = A   (VERSION = 0x04)
-    # Crystal accuracy = 10 ppm
-    # X-tal frequency = 26 MHz
-    # RF output power = 0 dBm
-    # RX filterbandwidth = 541.666667 kHz
-    # Deviation = 127 kHz
-    # Datarate = 249.938965 kBaud
-    # Modulation = (1) GFSK
-    # Manchester enable = (0) Manchester disabled
-    # RF Frequency = 432.999817 MHz
-    # Channel spacing = 199.951172 kHz
-    # Channel number = 0
-    # Optimization = Sensitivity
-    # Sync mode = (3) 30/32 sync word bits detected
-    # Format of RX/TX data = (0) Normal mode, use FIFOs for RX and TX
-    # CRC operation = (1) CRC calculation in TX and CRC check in RX enabled
-    # Forward Error Correction = (0) FEC disabled
-    # Length configuration = (1) Variable length packets, packet length configured by the first received byte after sync word.
-    # Packetlength = 255
-    # Preamble count = (2)  4 bytes
-    # Append status = 1
-    # Address check = (0) No address check
-    # FIFO autoflush = 0
-    # Device address = 0
-    # GDO0 signal selection = ( 6) Asserts when sync word has been sent / received, and de-asserts at the end of the packet
-    # GDO2 signal selection = (41) CHIP_RDY
 
     RF_SETTINGS = {
         'FSCTRL1':0x0C,   # FSCTRL1   Frequency synthesizer control.
@@ -411,18 +382,49 @@ class cc1101:
         'TEST0':0x09
         }
 
+# temperature sensor
+    RF_SETTINGS6 = {
+        'IOCFG0':0x06,
+        'PKTCTRL1':0x00,
+        'PKTCTRL0':0x02,    #fixed length
+        'PKTLEN':0xFF,
+        'FSCTRL1':0x0C,
+        'FREQ2':0x10,   # 433.92
+        'FREQ1':0xB0,
+        'FREQ0':0x71,
+        'MDMCFG4':0x26,    #BW 541 Data rate 2.250
+        'MDMCFG3':0x6B,
+        'MDMCFG2':0x32,
+        'DEVIATN':0x62,
+        'MCSM0':0x18,
+        'FOCCFG':0x1D,
+        'BSCFG':0x1C,
+        'AGCCTRL2':0x04,
+        'AGCCTRL1':0x00,
+        'AGCCTRL0':0x92,
+        'WORCTRL':0xFB,
+        'FREND1':0xB6,
+        'FREND0':0x11,
+        'FSCAL3':0xEA,
+        'FSCAL2':0x2A,
+        'SYNC1':0x01,
+        'SYNC0':0x84,
+        'FSCAL1':0x00,
+        'FSCAL0':0x1F,
+        'TEST0':0x09
+        }
+
     def __init__(self,num):
         self.obj=spidev.SpiDev()
         self.obj.open(num,0)
         self.GDO0State=False
-        #time.sleep(0.01)
         self.state='IDLE'
         self.config=0
-        #self.Reset()
         if num==0:
             self.GDO0Pin=153
         if num==1:
             self.GDO0Pin=161
+        fagpio.unexport(self.GDO0Pin)
 
     def Close(self):
         self.Reset()
@@ -525,17 +527,15 @@ class cc1101:
         if num==3:
             list=self.RF_SETTINGS3
             self.WriteBurstReg('PATABLE',[0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0])
-            #self.WriteBurstReg('PATABLE',[0,0x8F,0x8E,0x8D,0x8C,0x8B,0x8A,0x89])
         if num==4:
             list=self.RF_SETTINGS4
-            #self.WriteBurstReg('PATABLE',[0,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d])
-            #self.WriteBurstReg('PATABLE',[0,0x8F,0x8C,0x8A,0x88,0x86,0x85,0x84])
-            #self.WriteBurstReg('PATABLE',[0,0x8F,0x8A,0x87,0x84,0x82,0x80,0x78])
             self.WriteBurstReg('PATABLE',[0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0])
         if num==5:
             list=self.RF_SETTINGS5
             self.WriteBurstReg('PATABLE',[0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0])
-            #self.WriteBurstReg('PATABLE',[0,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d])
+        if num==6:
+            list=self.RF_SETTINGS6
+            self.WriteBurstReg('PATABLE',[0,0xC0,0x0,0x0,0x0,0x0,0x0,0x0])
         for key in list.keys():
             buffer.append(key)
             self.WriteReg(key,list[key])
@@ -549,8 +549,9 @@ class cc1101:
             self.GDO0Close()
         self.config=0
         r=self.Strobe('SRES')
-        time.sleep(0.01)
-        self.state=self.Marcstate()
+        while (self.Marcstate()!='IDLE'):
+            pass;
+        self.state='IDLE'
         return r
 
     def GDO0Open(self):
@@ -593,7 +594,6 @@ class cc1101:
 
     def Init(self,num):
         self.Reset()
-        time.sleep(0.01)
         return self.WriteSettings(num)
 
     def Marcstate(self):
@@ -601,54 +601,39 @@ class cc1101:
 
     def Stx(self):
         self.Strobe('STX')
-        time.sleep(0.01)
-        marcstate=self.ReadStatus('MARCSTATE')[1]
-        if marcstate=='0x13':
-            self.state='TX'
-        else:
-            print self.Marcstate_reg[marcstate]+' from Stx'
-            self.FlushTX()
-            self.Stx()
+        while (self.Marcstate()!='TX'):
+            pass
+        self.state='TX'
 
     def Srx(self):
         self.Strobe('SRX')
-        time.sleep(0.01)
-        marcstate=self.ReadStatus('MARCSTATE')[1]
-        if marcstate=='0xd':
-            self.state='RX'
-        else:
-            print self.Marcstate_reg[marcstate]+' from Srx'
-            self.FlushRX()
-            self.Srx()
+        while (self.Marcstate()!='RX'):
+            pass
+        self.state='RX'
 
     def Sidle(self):
         self.Strobe('SIDLE')
-        time.sleep(0.5)
-        marcstate=self.ReadStatus('MARCSTATE')[1]
-        if marcstate=='0x1':
-            self.state='IDLE'
-        else:
-            print self.Marcstate_reg[marcstate]+' from Sidle'
-            self.Sidle()
+        while (self.Marcstate()!='IDLE'):
+            pass
+        self.state='IDLE'
 
     def ReturnState(self):
-        st=self.state
-        time.sleep(0.01)
-        self.Sidle()
-        if st=='RX':
-            self.Srx()
-        elif st=='TX':
-            self.Stx()
+        self.Strobe('SNOP')
+        #st=self.state
+        #time.sleep(0.01)
+        #self.Sidle()
+        #if st=='RX':
+        #    self.Srx()
+        #elif st=='TX':
+        #    self.Stx()
 
     def FlushRX(self):
         self.Sidle()
         self.Strobe('SFRX')
-        self.state='IDLE'
 
     def FlushTX(self):
         self.Sidle()
         self.Strobe('SFTX')
-        self.state='IDLE'
 
     def Send(self,buffer):
         self.WriteBurstReg('TXFIFO',buffer)
@@ -729,18 +714,6 @@ class cc1101:
         if self.config!=num:
             self.WriteSettings(num)
 
-    def LevoloA2(self):
-        self.CheckSettings(4)
-        packet=[0xea, 0xaa, 0xa6, 0x66, 0x6a, 0x95, 0x75, 0x55, 0x53, 0x33,
-        0x35, 0x4a, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0xa5, 0xa5, 0x66,
-        0x6a, 0x95, 0x75, 0x55, 0x53, 0x33, 0x35, 0x4a, 0xba, 0xaa,
-        0xa9, 0x99, 0x9a, 0xa5, 0x5d, 0x55, 0x54, 0xcc, 0xcd, 0x52,
-        0xae, 0xaa, 0xaa, 0x66, 0x66, 0xa9, 0x57, 0x55, 0x55, 0x33,
-        0x33, 0x54, 0xab, 0xaa, 0xaa, 0x99, 0x99, 0xaa, 0x55, 0xd5,
-        0x55, 0x4c, 0xcc, 0xd5, 0x2a]
-        big_packet=self.inc_packet(packet,1100)
-        self.Send2(big_packet)
-
     def LevoloA(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x6a, 0x95, 0x75, 0x55, 0x53, 0x33,
@@ -749,18 +722,6 @@ class cc1101:
         0x57, 0x55, 0x55, 0x33, 0x33, 0x54, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xaa, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd5, 0x2a]
         big_packet=self.inc_packet(packet,1000)
-        self.Send2(big_packet)
-
-    def LevoloB2(self):
-        self.CheckSettings(4)
-        packet=[0xea, 0xaa, 0xa6, 0x66, 0x6a, 0x55, 0x75, 0x55, 0x53, 0x33,
-        0x35, 0x2a, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0x95, 0x95, 0x66,
-        0x6a, 0x55, 0x75, 0x55, 0x53, 0x33, 0x35, 0x2a, 0xba, 0xaa,
-        0xa9, 0x99, 0x9a, 0x95, 0x5d, 0x55, 0x54, 0xcc, 0xcd, 0x4a,
-        0xae, 0xaa, 0xaa, 0x66, 0x66, 0xa5, 0x57, 0x55, 0x55, 0x33,
-        0x33, 0x52, 0xab, 0xaa, 0xaa, 0x99, 0x99, 0xa9, 0x55, 0xd5,
-        0x55, 0x4c, 0xcc, 0xd4, 0xaa]
-        big_packet=self.inc_packet(packet,1100)
         self.Send2(big_packet)
 
     def LevoloB(self):
@@ -773,18 +734,6 @@ class cc1101:
         big_packet=self.inc_packet(packet,1000)
         self.Send2(big_packet)
 
-    def LevoloC2(self):
-        self.CheckSettings(4)
-        packet=[0xea,0xaa,0xa6,0x66,0x69,0x95,0x75,0x55,0x53,0x33,
-        0x34,0xca,0xba,0xaa,0xa9,0x99,0x9a,0x65,0x5d,0x55,
-        0x54,0xcc,0xcd,0x32,0xae,0xaa,0xaa,0x66,0x66,0x99,
-        0x57,0x55,0x55,0x33,0x33,0x4c,0xab,0xaa,0xaa,0x99,
-        0x99,0xa6,0x55,0xd5,0x55,0x4c,0xcc,0xd3,0x2a,0xea,
-        0xaa,0xa6,0x66,0x69,0x95,0x75,0x55,0x53,0x33,0x34,
-        0xca,0xba,0xaa,0xa9]
-        big_packet=self.inc_packet(packet,1100)
-        self.Send2(big_packet)
-
     def LevoloC(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x69, 0x95, 0x75, 0x55, 0x53, 0x33,
@@ -793,18 +742,6 @@ class cc1101:
         0x57, 0x55, 0x55, 0x33, 0x33, 0x4c, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xa6, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd3, 0x2a]
         big_packet=self.inc_packet(packet,1000)
-        self.Send2(big_packet)
-
-    def LevoloD2(self):
-        self.CheckSettings(4)
-        packet=[0xea,0xaa,0xa6,0x66,0x69,0x69,0x75,0x55,0x53,0x33,
-        0x34,0xb4,0xba,0xaa,0xa9,0x99,0x9a,0x5a,0x5d,0x55,
-        0x54,0xcc,0xcd,0x2d,0x2e,0xaa,0xaa,0x66,0x66,0x96,
-        0x97,0x55,0x55,0x33,0x33,0x4b,0x4b,0xaa,0xaa,0x99,
-        0x99,0xa5,0xa5,0xd5,0x55,0x4c,0xcc,0xd2,0xd2,0xea,
-        0xaa,0xa6,0x66,0x69,0x69,0x75,0x55,0x53,0x33,0x34,
-        0xb4,0xba,0xaa,0xa9,0x99]
-        big_packet=self.inc_packet(packet,1100)
         self.Send2(big_packet)
 
     def LevoloD(self):
@@ -817,7 +754,7 @@ class cc1101:
         big_packet=self.inc_packet(packet,1000)
         self.Send2(big_packet)
 
-    def Receive(self,packet_len):
+    def Receive(self):
         def levolo_but(b):
             buttons={'10100101':'LevoloA','10010101':'LevoloB','01100101':'LevoloC','01011010':'LevoloD'}
             a=human_bin(b).replace('11111111','') # убрать шумы если куча FF, мешает определению клавиши
@@ -857,6 +794,36 @@ class cc1101:
             else:
                 return 'Bad packet'
 
+        class temperature:
+            def __init__(self):
+                self.t=0
+                self.h=0
+
+        def Temp_Decode(b):
+            p=re.compile('1+')
+            ps=re.compile('10{20,22}')
+            p1=re.compile('10{4,6}')
+            p0=re.compile('10{8,10}')
+            a=p1.sub('one',p0.sub('null',ps.sub('s',p.sub('1',human_bin(b))))).replace('null','0').replace('one','1').split('s')
+            temp=temperature()
+            if a:
+                dpack=dict([[x,a.count(x)] for x in set(a)])
+                # сортировать по кол-ву повторов сообщения
+                sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
+                # вернуть сообщение ктр чаще повторилось
+                buffer=sorted_dpack[len(sorted_dpack)-1][0][4:]
+                len_buf=len(buffer)
+                rez=[]
+                for i in range(0,len_buf/8):
+                    b=buffer[i*8:i*8+8]
+                    rez.append(int(b,2))
+                if len(rez)==4:
+                    temp.t=(511-rez[2])/10.0
+                    temp.h=255-rez[3]
+                return temp
+            else:
+                return 'Bad packet'
+
         def human_bin(buf):
             a=''
             b=[]
@@ -873,6 +840,7 @@ class cc1101:
             self.GDO0Open()
 
         def run():
+            packet_len=1500
             buffer=[]
             self.FlushRX()
             self.Srx()
@@ -884,29 +852,48 @@ class cc1101:
             print('RSSI: '+self.RSSI)
             while True:
                 bytes=int(self.ReadStatus('RXBYTES')[1],16)
+                #Читать кол-во байт, пока не повторится. стр. 56
+                while bytes!=int(self.ReadStatus('RXBYTES')[1],16):
+                    bytes=int(self.ReadStatus('RXBYTES')[1],16)
+                #print bytes
+                #print self.ReadStatus('RSSI')[1]
                 if sum_bytes+bytes>=packet_len:
                     kol=packet_len-len(buffer)
                     buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
                     print buffer
+                    #print human_bin(buffer)
                     #print len(buffer)
                     #print levolo_but(buffer)
-                    return TriStateCode(buffer)
+                    #return TriStateCode(buffer)
                     #print time.ctime()
                     #return levolo_but(buffer)
+                    temp=Temp_Decode(buffer)
+                    return str(temp.t)+':'+str(temp.h)
                     break
                 else:
-                    buffer+=self.ReadBurstReg('RXFIFO',bytes)[1:]
-                    sum_bytes+=bytes
-                time.sleep(0.015)
+                #bytes-1 потому что нельзя считывать последний байт 
+                #до окончания всей передачи. стр 56
+                    part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
+                    #print part
+                    part_str=''
+                    for i in part:
+                        part_str+=i
+                    if ('0x00x00x0' in part_str) or ('0xff0xff0xff' in part_str):
+                        print buffer
+                        print str(len(buffer))
+                        temp=Temp_Decode(buffer)
+                        return str(temp.t)+':'+str(temp.h)
+                        break
+                    buffer+=part
+                    sum_bytes+=bytes-1
+                    time.sleep(0.015)
+
         try:
             rez=run()
             self.FlushRX()
             return rez
         except KeyboardInterrupt:
             self.GDO0Close()
-            #epoll.unregister(f)
-            #fagpio.unexport(p)
-            #self.GDO0state='close'
 
 CommandList = ['LevoloA',
 'LevoloB',
