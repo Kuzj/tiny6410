@@ -66,17 +66,17 @@ class sock_thread_out(threading.Thread):
 
     def run(self):
         while 1:
-            data=mod0.Receive(1000)
+            data=mod0.Receive()
             try:
                 sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 sock.connect(SOCKFILE_OUT)
+                logging.info('Receive: '+data)
+                sock.send(data)
+                sock.recv(1024)
+                sock.close()
             except Exception,e:
-                logging.info('OpenSCADA socket connect error: '+e)
-                raise Exception(e)
-            logging.info('Receive: '+data)
-            sock.send(data)
-            sock.recv(1024)
-            sock.close()
+                logging.info('OpenSCADA socket error: '+str(e))
+                #raise Exception(e)
 
 class cc1101d(Daemon):
 

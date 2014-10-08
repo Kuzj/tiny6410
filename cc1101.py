@@ -864,26 +864,29 @@ class cc1101:
                     #print human_bin(buffer)
                     #print len(buffer)
                     #print levolo_but(buffer)
-                    #return TriStateCode(buffer)
+                    return TriStateCode(buffer)
                     #print time.ctime()
                     #return levolo_but(buffer)
-                    temp=Temp_Decode(buffer)
-                    return str(temp.t)+':'+str(temp.h)
+                    #temp=Temp_Decode(buffer)
+                    #return str(temp.t)+':'+str(temp.h)
                     break
                 else:
                 #bytes-1 потому что нельзя считывать последний байт 
                 #до окончания всей передачи. стр 56
                     part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
-                    #print part
+                    print part
                     part_str=''
                     for i in part:
                         part_str+=i
-                    if ('0x00x00x0' in part_str) or ('0xff0xff0xff' in part_str):
+                    if ('0xff0xff0xff' in part_str):
                         print buffer
-                        print str(len(buffer))
-                        temp=Temp_Decode(buffer)
-                        return str(temp.t)+':'+str(temp.h)
-                        break
+                    #    return levolo_but(buffer)
+                    #    print human_bin(buffer)
+                    #    print str(len(buffer))
+                        return TriStateCode(buffer)
+                    #    temp=Temp_Decode(buffer)
+                    #    return str(temp.t)+':'+str(temp.h)
+                    #    break
                     buffer+=part
                     sum_bytes+=bytes-1
                     time.sleep(0.015)
