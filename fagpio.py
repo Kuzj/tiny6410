@@ -176,7 +176,7 @@ def unexport(num):
         call(["gpio-admin","unexport",num])
         return True
     else:
-        print('gpio absent or not export')
+        print(num+' gpio absent or not export')
         return False
 
 def printlist():
