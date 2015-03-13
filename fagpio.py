@@ -32,25 +32,12 @@ class gpiochip:
 
 class gpio(object):
     def __init__(self,num):
-        num=str(num)
-        self.name=num
-        if not os.access(gpio_path+num, os.R_OK):
-            print(num+' is not export or do not exist')
-#            factive=open(gpio_path+num+'/active_low')
-#            self._active=int(factive.read().rstrip())
-#            factive.close()
-#            fdir=open(gpio_path+num+'/direction')
-#            self._direction=fdir.read().rstrip()
-#            fdir.close()
+        self.name=str(num)
+        if not isexport(int(num)): #not os.access(gpio_path+num, os.R_OK):
+            print(self.name+' is not export or do not exist')
         else:
-            if os.access(gpio_path+num+'/value', os.W_OK):
-                self.fvalue=open(gpio_path+num+'/value')
-#            self._value=int(fvalue.read().rstrip())
-#            fvalue.close()
-#            if os.access(gpio_path+num+'/edge', os.R_OK):
-#                fedge=open(gpio_path+num+'/edge')
-#                self._edge=fedge.read().rstrip()
-#                fedge.close()
+            if os.access(gpio_path+self.name+'/value', os.W_OK):
+                self.fvalue=open(gpio_path+self.name+'/value')
 
     def getactive(self):
         if os.access(gpio_path+self.name+'/active_low', os.R_OK):
@@ -116,6 +103,9 @@ class gpio(object):
             return self._value
 
     def setvalue(self,val):
+        if self.direction=='out' and self.fvalue.mode<>'w+':
+            self.fvalue.close()
+            self.fvalue=open(gpio_path+self.name+'/value','w+',0)
         if val in range(0,2):
             val=str(val)
             self.fvalue.write(val)
@@ -159,24 +149,17 @@ class gpio(object):
         return f
 
 def export(num):
-    num=str(num)
-    if os.access(gpio_path+num, os.R_OK):
-        print('gpio'+num+' already export.')
-        return True
-    elif int(num) not in range(0,203):
-        print('gpio'+num+' absent.')
-        return False
-    else:
-        call(["gpio-admin","export",num])
-        return True
+    if not isexport(num):
+        call(["gpio-admin","export",str(num)])
 
 def unexport(num):
-    num=str(num)
-    if os.access(gpio_path+num, os.R_OK):
-        call(["gpio-admin","unexport",num])
+    if isexport(num):
+        call(["gpio-admin","unexport",str(num)])
+
+def isexport(num):
+    if (num in range(0,203)) and (os.access(gpio_path+str(num), os.R_OK)):
         return True
     else:
-        print(num+' gpio absent or not export')
         return False
 
 def printlist():
