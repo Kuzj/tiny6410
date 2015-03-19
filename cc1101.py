@@ -421,9 +421,9 @@ class cc1101:
         self.state='IDLE'
         self.config=0
         if num==0:
-            self.GDO0Pin=153
+            self.GDO0Pin=153 #eint9 gpn9
         if num==1:
-            self.GDO0Pin=161
+            self.GDO0Pin=155 #eint11 gpn11
         fagpio.unexport(self.GDO0Pin)
 
     def Close(self):
@@ -542,6 +542,17 @@ class cc1101:
             time.sleep(0.001)
             buffer.append(self.ReadReg(key)[1])
             time.sleep(0.001)
+        return buffer
+
+    def PrintSettings(self):
+        buffer=[]
+        print 'settings number is: '+str(self.config)
+        sort_register=sorted(self.REGISTER.items(), key=operator.itemgetter(1))
+        for i in sort_register:
+            buffer.append(i[0])
+            buffer.append(self.ReadReg(i[0])[1])
+            if i[1]==46:
+                break
         return buffer
 
     def Reset(self):
@@ -818,7 +829,8 @@ class cc1101:
                     b=buffer[i*8:i*8+8]
                     rez.append(int(b,2))
                 if len(rez)==4:
-                    temp.t=(511-rez[2])/10.0
+                    temp.t=(255-rez[2])/10.0
+                    #temp.t=(511-rez[2])/10.0
                     temp.h=255-rez[3]
                 return temp
             else:
@@ -860,8 +872,8 @@ class cc1101:
                 if sum_bytes+bytes>=packet_len:
                     kol=packet_len-len(buffer)
                     buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                    print buffer
-                    #print human_bin(buffer)
+                    #print buffer
+                    print human_bin(buffer)
                     #print len(buffer)
                     #print levolo_but(buffer)
                     #return TriStateCode(buffer)
@@ -874,19 +886,20 @@ class cc1101:
                 #bytes-1 потому что нельзя считывать последний байт 
                 #до окончания всей передачи. стр 56
                     part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
-                    print part
+                    #print part
                     part_str=''
                     for i in part:
                         part_str+=i
                     if ('0xff0xff0xff' in part_str):
-                        print buffer
+                        print 'ff'
+                    #    print buffer
                     #    return levolo_but(buffer)
-                    #    print human_bin(buffer)
+                        print human_bin(buffer)
                     #    print str(len(buffer))
-                        return TriStateCode(buffer)
-                    #    temp=Temp_Decode(buffer)
-                    #    return str(temp.t)+':'+str(temp.h)
-                    #    break
+                    #    return TriStateCode(buffer)
+                        temp=Temp_Decode(buffer)
+                        return str(temp.t)+':'+str(temp.h)
+                        break
                     buffer+=part
                     sum_bytes+=bytes-1
                     time.sleep(0.015)
