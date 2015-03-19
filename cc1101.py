@@ -135,7 +135,8 @@ class cc1101:
     READ_SINGLE=0x80
     READ_BURST=0xC0
 
-    RF_SETTINGS = {
+    RF_SETTINGS = [
+        {
         'FSCTRL1':0x0C,   # FSCTRL1   Frequency synthesizer control.
         'FSCTRL0':0x00,   # FSCTRL0   Frequency synthesizer control.
         'FREQ2':0x10,   # FREQ2     Frequency control word, high byte.
@@ -172,9 +173,9 @@ class cc1101:
         'ADDR':0x00,   # ADDR      Device address.
         'PKTLEN':0xFF,    # PKTLEN    Packet length.
         'PATABLE':0x1d
-    }
+        },
 
-    RF_SETTINGS1 = {
+        {
         'IOCFG0':0x06,
         'PKTCTRL0':0x05,
         'FSCTRL1':0x0C,
@@ -199,10 +200,9 @@ class cc1101:
         'FSCAL1':0x00,
         'FSCAL0':0x1F,
         'TEST0':0x09
-    }
-
-    # Asynch with rx on GDO0
-    RF_SETTINGS2 = {
+        },
+        # Asynch with rx on GDO0
+        {
         'IOCFG0':0x0D,
         'PKTCTRL1':0x00,
         'PKTCTRL0':0x32,
@@ -231,68 +231,9 @@ class cc1101:
         'TEST1':0x35,
         'TEST2':0x81,
         'FIFOTHR':0x47
-        }
-
-    #RF_SETTINGS2 = {
-    #    'IOCFG0':0x0D,
-    #    'PKTCTRL1':0x00,
-    #    'PKTCTRL0':0x32,
-    #    'FSCTRL1':0x0C,
-    #    'FREQ2':0x10,
-    #    'FREQ1':0xB0,
-    #    'FREQ0':0x71,
-    #    'MDMCFG4':0x28,    # BW 500 Data rate 9.6
-    #    'MDMCFG3':0x83,
-    #    'MDMCFG2':0x30,
-    #    'DEVIATN':0x62,
-    #    'MCSM0':0x18,
-    #    'FOCCFG':0x1D,
-    #    'BSCFG':0x1C,
-    #    'AGCCTRL2':0x04,
-    #    'AGCCTRL1':0x00,
-    #    'AGCCTRL0':0x92,
-    #    'WORCTRL':0xFB,
-    #    'FREND1':0xB6,
-    #    'FREND0':0x11,
-    #    'FSCAL3':0xEA,
-    #    'FSCAL2':0x2A,
-    #    'FSCAL1':0x00,
-    #    'FSCAL0':0x1F,
-    #    'TEST0':0x09
-    #    }
-
-    #RF_SETTINGS3 = {
-    #    'IOCFG0':0x4D,
-    #    'PKTCTRL1':0x00,
-    #    'PKTCTRL0':0x32,
-    #    'FSCTRL1':0x08,
-    #    'FREQ2':0x10,
-    #    'FREQ1':0xB0,
-    #    'FREQ0':0x71,
-    #    'MDMCFG4':0x87,    # BW 200 Data rate 4.8
-    #    'MDMCFG3':0x83,
-    #    'MDMCFG2':0x30,
-    #    'DEVIATN':0x42,
-    #    'MCSM0':0x18,
-    #    'FOCCFG':0x1D,
-    #    'BSCFG':0x1C,
-    #    'AGCCTRL2':0x04,
-    #    'AGCCTRL1':0x00,
-    #    'AGCCTRL0':0x92,
-    #    'WORCTRL':0xFB,
-    #    'FREND1':0xB6,
-    #    'FREND0':0x11,
-    #    'FSCAL3':0xEA,
-    #    'FSCAL2':0x2A,
-    #    'FSCAL1':0x00,
-    #    'FSCAL0':0x1F,
-    #    'TEST0':0x09,
-    #    'TEST1':0x35,
-    #    'TEST2':0x81
-    #    }
-
-    # Simple naked packet for Asynch
-    RF_SETTINGS3 = {
+        },
+        # Simple naked packet for Asynch
+        {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
         'PKTCTRL0':0x00,    #fixed length
@@ -319,9 +260,9 @@ class cc1101:
         'FSCAL1':0x00,
         'FSCAL0':0x1F,
         'TEST0':0x09
-        }
+        },
 
-    RF_SETTINGS4 = {
+        {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
         'PKTCTRL0':0x02,    #infinite length
@@ -348,10 +289,9 @@ class cc1101:
         'FSCAL1':0x00,
         'FSCAL0':0x1F,
         'TEST0':0x09
-        }
-
-# motion sensor
-    RF_SETTINGS5 = {
+        },
+        # motion sensor
+        {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
         'PKTCTRL0':0x02,    #fixed length
@@ -380,10 +320,9 @@ class cc1101:
         'FSCAL1':0x00,
         'FSCAL0':0x1F,
         'TEST0':0x09
-        }
-
-# temperature sensor
-    RF_SETTINGS6 = {
+        },
+        # temperature sensor
+        {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
         'PKTCTRL0':0x02,    #fixed length
@@ -413,6 +352,7 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         }
+    ]
 
     def __init__(self,num):
         self.obj=spidev.SpiDev()
@@ -516,26 +456,10 @@ class cc1101:
     def WriteSettings(self,num):
         buffer=[]
         self.config=num
-        if num==0:
-            list=self.RF_SETTINGS
-        if num==1:
-            list=self.RF_SETTINGS1
-            self.WriteBurstReg('PATABLE',[0,0x1d,0,0,0,0,0,0])
-        if num==2:
-            list=self.RF_SETTINGS2
-            self.WriteBurstReg('PATABLE',[0,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d])
-        if num==3:
-            list=self.RF_SETTINGS3
-            self.WriteBurstReg('PATABLE',[0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0])
-        if num==4:
-            list=self.RF_SETTINGS4
-            self.WriteBurstReg('PATABLE',[0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0])
-        if num==5:
-            list=self.RF_SETTINGS5
-            self.WriteBurstReg('PATABLE',[0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0])
-        if num==6:
-            list=self.RF_SETTINGS6
-            self.WriteBurstReg('PATABLE',[0,0xC0,0x0,0x0,0x0,0x0,0x0,0x0])
+        #self.WriteBurstReg('PATABLE',[0,0x1d,0,0,0,0,0,0]) #setting 1
+        #self.WriteBurstReg('PATABLE',[0,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d,0x1d]) #setting 2
+        list=self.RF_SETTINGS[num]
+        self.WriteBurstReg('PATABLE',[0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0,0xC0])
         for key in list.keys():
             buffer.append(key)
             self.WriteReg(key,list[key])
