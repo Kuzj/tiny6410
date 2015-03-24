@@ -690,7 +690,7 @@ class cc1101:
         self.Send2(big_packet)
 
     def Receive(self):
-        def levolo_but(b):
+        def LevoloButton(b):
             buttons={'10100101':'LevoloA','10010101':'LevoloB','01100101':'LevoloC','01011010':'LevoloD'}
             a=human_bin(b).replace('11111111','') # убрать шумы если куча FF, мешает определению клавиши
             a=a.split('111')[1:]
@@ -704,7 +704,7 @@ class cc1101:
                     but=buttons.setdefault(but)
                 return but
             else:
-                return 'Bad packet'
+                return 0
 
         def TriStateCode(b):
             buttons={'10001000':'0','11101110':'1','10001110':'f'}
@@ -727,14 +727,14 @@ class cc1101:
                             word=word+'?'
                 return word
             else:
-                return 'Bad packet'
+                return 0
 
         class temperature:
             def __init__(self):
                 self.t=0
                 self.h=0
 
-        def Temp_Decode(b):
+        def TempDecode(b):
             p=re.compile('1+')
             ps=re.compile('10{20,22}')
             p1=re.compile('10{4,6}')
@@ -756,9 +756,10 @@ class cc1101:
                     temp.t=(255-rez[2])/10.0
                     #temp.t=(511-rez[2])/10.0
                     temp.h=255-rez[3]
-                return temp
+                #return temp
+                return str(temp.t)+':'+str(temp.h)
             else:
-                return 'Bad packet'
+                return 0
 
         def human_bin(buf):
             a=''
@@ -771,6 +772,13 @@ class cc1101:
                 b[i]=(8-len(b[i]))*'0'+b[i]
                 a=a+b[i]
             return a
+        # Соответствие номеру конфигурации и функции обработки сообщения
+        def buffer_convert(x):
+            return {
+                4: LevoloButton,
+                5: TriStateCode,
+                6: TempDecode,
+            }.get(x, TriStateCode)
 
         if not self.GDO0State:
             self.GDO0Open()
@@ -791,20 +799,11 @@ class cc1101:
                 #Читать кол-во байт, пока не повторится. стр. 56
                 while bytes!=int(self.ReadStatus('RXBYTES')[1],16):
                     bytes=int(self.ReadStatus('RXBYTES')[1],16)
-                #print bytes
-                #print self.ReadStatus('RSSI')[1]
                 if sum_bytes+bytes>=packet_len:
                     kol=packet_len-len(buffer)
                     buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                    #print buffer
                     print human_bin(buffer)
-                    #print len(buffer)
-                    #print levolo_but(buffer)
-                    #return TriStateCode(buffer)
-                    #print time.ctime()
-                    #return levolo_but(buffer)
-                    temp=Temp_Decode(buffer)
-                    return str(temp.t)+':'+str(temp.h)
+                    return buffer_convert(self.config)(buffer) 
                     break
                 else:
                 #bytes-1 потому что нельзя считывать последний байт 
@@ -816,13 +815,8 @@ class cc1101:
                         part_str+=i
                     if ('0xff0xff0xff' in part_str):
                         print 'ff'
-                    #    print buffer
-                    #    return levolo_but(buffer)
                         print human_bin(buffer)
-                    #    print str(len(buffer))
-                    #    return TriStateCode(buffer)
-                        temp=Temp_Decode(buffer)
-                        return str(temp.t)+':'+str(temp.h)
+                        return buffer_convert(self.config)(buffer) 
                         break
                     buffer+=part
                     sum_bytes+=bytes-1
