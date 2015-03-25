@@ -783,6 +783,14 @@ class cc1101:
         if not self.GDO0State:
             self.GDO0Open()
 
+        def rssi_dbm(x):
+            rssi_offset=74
+            if x>=128:
+                rssi=(x-256)/2-rssi_offset
+            else:
+                rssi=(x/2)-rssi_offset
+            return rssi
+
         def run():
             packet_len=1500
             buffer=[]
@@ -793,7 +801,8 @@ class cc1101:
             print 'start...'
             events=self.epoll_obj.poll()
             self.RSSI=self.ReadStatus('RSSI')[1]
-            print('RSSI: '+self.RSSI)
+            #print(self.RSSI)
+            print('RSSI: '+str(rssi_dbm(int(self.RSSI,0)))+' db')
             while True:
                 bytes=int(self.ReadStatus('RXBYTES')[1],16)
                 #Читать кол-во байт, пока не повторится. стр. 56
@@ -802,7 +811,7 @@ class cc1101:
                 if sum_bytes+bytes>=packet_len:
                     kol=packet_len-len(buffer)
                     buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                    print human_bin(buffer)
+                    #print human_bin(buffer)
                     return buffer_convert(self.config)(buffer) 
                     break
                 else:
@@ -814,8 +823,8 @@ class cc1101:
                     for i in part:
                         part_str+=i
                     if ('0xff0xff0xff' in part_str):
-                        print 'ff'
-                        print human_bin(buffer)
+                        #print 'ff'
+                        #print human_bin(buffer)
                         return buffer_convert(self.config)(buffer) 
                         break
                     buffer+=part
