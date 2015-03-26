@@ -290,7 +290,7 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         },
-        # motion sensor
+        # motion sensor (tristatecode)
         {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
@@ -300,9 +300,40 @@ class cc1101:
         'FREQ2':0x10,   # 433.6
         'FREQ1':0xAD,
         'FREQ0':0x4A,
-        'MDMCFG4':0x27,    #BW 541 Data rate 5.19466
-        'MDMCFG3':0xA3,
+        'MDMCFG4':0x26,    #BW 541 0x27 0xA3 Datarate 5.19466 key 1.5 
+        'MDMCFG3':0x23,    #0x26 0x23 datarate 1.810 key 4.7
         'MDMCFG2':0x32,
+        'DEVIATN':0x62,
+        'MCSM0':0x18,
+        'FOCCFG':0x1D,
+        'BSCFG':0x1C,
+        'AGCCTRL2':0x04,
+        'AGCCTRL1':0x00,
+        'AGCCTRL0':0x92,
+        'WORCTRL':0xFB,
+        'FREND1':0xB6,
+        'FREND0':0x11,
+        'FSCAL3':0xEA,
+        'FSCAL2':0x2A,
+        'SYNC1':0xEE,
+        'SYNC0':0x8E,
+        'FSCAL1':0x00,
+        'FSCAL0':0x1F,
+        'TEST0':0x09
+        },
+        # water sensor (tristatecode)
+        {
+        'IOCFG0':0x06,
+        'PKTCTRL1':0x00,
+        'PKTCTRL0':0x02,    #fixed length
+        'PKTLEN':0xFF,
+        'FSCTRL1':0x0C,
+        'FREQ2':0x10,   # 433.92
+        'FREQ1':0xB0,
+        'FREQ0':0x71,
+        'MDMCFG4':0x26,    #BW 541 0x27 0xe8 Datarate 6.060 key 1.5M
+        'MDMCFG3':0x30,    #mdmcfg4: 0x26 mdmcfg3 0xb1 datarate 2.690 key 3.3M
+        'MDMCFG2':0x32,    #0x26 0x30 datarate 1.890 key 4.7M
         'DEVIATN':0x62,
         'MCSM0':0x18,
         'FOCCFG':0x1D,
@@ -777,7 +808,8 @@ class cc1101:
             return {
                 4: LevoloButton,
                 5: TriStateCode,
-                6: TempDecode,
+                6: TriStateCode,
+                7: TempDecode,
             }.get(x, TriStateCode)
 
         if not self.GDO0State:
@@ -837,6 +869,22 @@ class cc1101:
             return rez
         except KeyboardInterrupt:
             self.GDO0Close()
+
+    def scan_datarate(self,start,end,step):
+        dr=start
+        while dr<end:
+            self.DataRate(dr)
+            print(str(dr))
+            dr+=step
+            time.sleep(8)
+
+    def scan_freq(self,start,end,step):
+        freq=start
+        while freq<end:
+            self.Freq(freq)
+            print(str(freq))
+            freq+=step
+            time.sleep(8)
 
 CommandList = ['LevoloA',
 'LevoloB',
