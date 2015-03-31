@@ -784,9 +784,16 @@ class cc1101:
                     b=buffer[i*8:i*8+8]
                     rez.append(int(b,2))
                 if len(rez)==4:
-                    temp.t=(255-rez[2])/10.0
-                    #temp.t=(511-rez[2])/10.0
+                    if rez[1]==112:
+                        temp.t=(0-rez[2])/10.0
+                    elif rez[1]==127:
+                        temp.t=(255-rez[2])/10.0
+                    elif rez[1]==126:
+                        temp.t=(511-rez[2])/10.0
+                    else:
+                        temp.t=(-255-rez[2])/10.0
                     temp.h=255-rez[3]
+                    #print rez
                 #return temp
                 return str(temp.t)+':'+str(temp.h)
             else:
