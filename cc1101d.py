@@ -7,6 +7,7 @@ import logging
 import os
 import socket
 import threading
+import Queue
 
 PIDFILE = '/var/run/cc1101d/cc1101d.pid'
 LOGFILE = '/var/log/cc1101d/cc1101d.log'
@@ -29,6 +30,44 @@ def status():
         return True
     else:
         return False
+
+class ProcessThread(Thread):
+    def __init__(self):
+        super(ProcessThread, self).__init__()
+        self.running = True
+        self.q = Queue.Queue()
+
+    def add(self, data):
+        self.q.put(data)
+
+    def stop(self):
+        self.running = False
+
+    def run(self):
+        q = self.q
+        while self.running:
+            try:
+                # block for 1 second only:
+                value = q.get(block=True, timeout=1)
+                process(value)
+            except Queue.Empty:
+                sys.stdout.write('.')
+                sys.stdout.flush()
+        #
+        if not q.empty():
+            print "Elements left in the queue:"
+            while not q.empty():
+                print q.get()
+
+t = ProcessThread()
+t.start()
+
+def process(value):
+    """
+    Implement this. Do something useful with the received data.
+    """
+    print value
+    sleep(randint(1,9))    # emulating processing time
 
 class sock_thread(threading.Thread):
 

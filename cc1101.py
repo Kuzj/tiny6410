@@ -10,6 +10,20 @@ import re
 
 class cc1101:
     #------------------------------------------------------------------------------------------------------
+    # Settings
+    scan_timeout=8 # for scan_datarate(), scan_freq()
+    spi0_gdo0=153 # eint9 gpn9
+    spi1_gdo0=155 # eint11 gpn11
+    packet_len=1500 # for Receive()
+    command_list = ['LevoloA',
+        'LevoloB',
+        'LevoloC',
+        'LevoloD',
+        'ButtonA',
+        'ButtonC',
+        'Marcstate',
+        ]
+    #------------------------------------------------------------------------------------------------------
     # CC1101 STROBE, CONTROL AND STATUS REGSITER
 
     REGISTER={
@@ -61,6 +75,7 @@ class cc1101:
         'TEST1':0x2D,       # Various test settings
         'TEST0':0x2E,       # Various test settings
 
+    #------------------------------------------------------------------------------------------------------
     # Strobe commands
         'SRES':0x30,        # Reset chip.
         'SFSTXON':0x31,     # Enable and calibrate frequency synthesizer (if MCSM0.FS_AUTOCAL=1).
@@ -135,7 +150,9 @@ class cc1101:
     READ_SINGLE=0x80
     READ_BURST=0xC0
 
+    #------------------------------------------------------------------------------------------------------
     RF_SETTINGS = [
+        # 0
         {
         'FSCTRL1':0x0C,   # FSCTRL1   Frequency synthesizer control.
         'FSCTRL0':0x00,   # FSCTRL0   Frequency synthesizer control.
@@ -175,6 +192,7 @@ class cc1101:
         'PATABLE':0x1d
         },
 
+        # 1 
         {
         'IOCFG0':0x06,
         'PKTCTRL0':0x05,
@@ -201,7 +219,8 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         },
-        # Asynch with rx on GDO0
+        # 2 
+        #Asynch with rx on GDO0
         {
         'IOCFG0':0x0D,
         'PKTCTRL1':0x00,
@@ -232,6 +251,7 @@ class cc1101:
         'TEST2':0x81,
         'FIFOTHR':0x47
         },
+        # 3
         # Simple naked packet for Asynch
         {
         'IOCFG0':0x06,
@@ -261,7 +281,8 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         },
-
+        # 4
+        # Levolo
         {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
@@ -290,6 +311,7 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         },
+        # 5
         # motion sensor (tristatecode)
         {
         'IOCFG0':0x06,
@@ -321,6 +343,7 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         },
+        # 6
         # water sensor (tristatecode)
         {
         'IOCFG0':0x06,
@@ -352,6 +375,7 @@ class cc1101:
         'FSCAL0':0x1F,
         'TEST0':0x09
         },
+        # 7
         # temperature sensor
         {
         'IOCFG0':0x06,
@@ -392,9 +416,9 @@ class cc1101:
         self.state='IDLE'
         self.config=0
         if num==0:
-            self.GDO0Pin=153 #eint9 gpn9
+            self.GDO0Pin=self.spi0_gdo0
         if num==1:
-            self.GDO0Pin=155 #eint11 gpn11
+            self.GDO0Pin=self.spi1_gdo0
         fagpio.unexport(self.GDO0Pin)
 
     def Close(self):
@@ -643,7 +667,7 @@ class cc1101:
         len_pack=255
         self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0x88,0xEE,0x88]
-        big_packet=self.inc_packet(packet,len_pack)
+        big_packet=self.IncPacket(packet,len_pack)
         self.Send2(big_packet)
 
     def ButtonA(self):
@@ -651,7 +675,7 @@ class cc1101:
         len_pack=255
         self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0x88,0x88,0xEE]
-        big_packet=self.inc_packet(packet,len_pack)
+        big_packet=self.IncPacket(packet,len_pack)
         self.Send2(big_packet)
 
     def ButtonC(self):
@@ -659,14 +683,14 @@ class cc1101:
         len_pack=255
         self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0xEE,0x88,0x88]
-        big_packet=self.inc_packet(packet,len_pack)
+        big_packet=self.IncPacket(packet,len_pack)
         self.Send2(big_packet)
 
     def LevoloPreSend(self):
         self.WriteReg('MDMCFG2',0x30) #ASK, No preamble/sync
         self.WriteReg('PKTCTRL0',0x02) #Normal mode, infinite packet
 
-    def inc_packet(self,pack,size):
+    def IncPacket(self,pack,size):
         new_packet=[]
         cur=0
         while len(new_packet)<size:
@@ -687,7 +711,7 @@ class cc1101:
         0x54, 0xcc, 0xcd, 0x52, 0xae, 0xaa, 0xaa, 0x66, 0x66, 0xa9,
         0x57, 0x55, 0x55, 0x33, 0x33, 0x54, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xaa, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd5, 0x2a]
-        big_packet=self.inc_packet(packet,1000)
+        big_packet=self.IncPacket(packet,1000)
         self.Send2(big_packet)
 
     def LevoloB(self):
@@ -697,7 +721,7 @@ class cc1101:
         0x54, 0xcc, 0xcd, 0x4a, 0xae, 0xaa, 0xaa, 0x66, 0x66, 0xa5,
         0x57, 0x55, 0x55, 0x33, 0x33, 0x52, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xa9, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd4, 0xaa]
-        big_packet=self.inc_packet(packet,1000)
+        big_packet=self.IncPacket(packet,1000)
         self.Send2(big_packet)
 
     def LevoloC(self):
@@ -707,7 +731,7 @@ class cc1101:
         0x54, 0xcc, 0xcd, 0x32, 0xae, 0xaa, 0xaa, 0x66, 0x66, 0x99,
         0x57, 0x55, 0x55, 0x33, 0x33, 0x4c, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xa6, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd3, 0x2a]
-        big_packet=self.inc_packet(packet,1000)
+        big_packet=self.IncPacket(packet,1000)
         self.Send2(big_packet)
 
     def LevoloD(self):
@@ -717,121 +741,147 @@ class cc1101:
         0x54, 0xcc, 0xcd, 0x2d, 0x2e, 0xaa, 0xaa, 0x66, 0x66, 0x96,
         0x97, 0x55, 0x55, 0x33, 0x33, 0x4b, 0x4b, 0xaa, 0xaa, 0x99,
         0x99, 0xa5, 0xa5, 0xd5, 0x55, 0x4c, 0xcc, 0xd2, 0xd2]
-        big_packet=self.inc_packet(packet,1000)
+        big_packet=self.IncPacket(packet,1000)
         self.Send2(big_packet)
 
-    def Receive(self):
-        def LevoloButton(b):
-            buttons={'10100101':'LevoloA','10010101':'LevoloB','01100101':'LevoloC','01011010':'LevoloD'}
-            a=human_bin(b).replace('11111111','') # убрать шумы если куча FF, мешает определению клавиши
-            a=a.split('111')[1:]
-            if a:
-                dpack=dict([[x,a.count(x)] for x in set(a)])
-                # сортировать по кол-ву повторов сообщения
-                sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
-                # вернуть сообщение ктр чаще повторилось [35:43] - нажатая кнопка
-                but=sorted_dpack[len(sorted_dpack)-1][0][35:43]
-                if buttons.setdefault(but) is not None:
-                    but=buttons.setdefault(but)
-                return but
-            else:
-                return 0
+    def LevoloButton(self,b):
+        buttons={'10100101':'LevoloA','10010101':'LevoloB','01100101':'LevoloC','01011010':'LevoloD'}
+        a=self.HumanBin(b).replace('11111111','') # убрать шумы если куча FF, мешает определению клавиши
+        a=a.split('111')[1:]
+        if a:
+            dpack=dict([[x,a.count(x)] for x in set(a)])
+            # сортировать по кол-ву повторов сообщения
+            sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
+            # вернуть сообщение ктр чаще повторилось [35:43] - нажатая кнопка
+            but=sorted_dpack[len(sorted_dpack)-1][0][35:43]
+            if buttons.setdefault(but) is not None:
+                but=buttons.setdefault(but)
+            return but
+        else:
+            return 0
 
-        def TriStateCode(b):
-            buttons={'10001000':'0','11101110':'1','10001110':'f'}
-            a=human_bin(b).replace('11111111','')
-            a=a.split('10000000000000000000000000000000')[1:]
-            if a:
-                dpack=dict([[x,a.count(x)] for x in set(a)])
-                # сортировать по кол-ву повторов сообщения
-                sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
-                # вернуть сообщение ктр чаще повторилось
-                buffer=sorted_dpack[len(sorted_dpack)-1][0]
-                word=''
-                len_buf=len(buffer)
-                if len_buf%8==0:
-                    for i in range(0,len_buf/8):
-                        but=buffer[i*8:i*8+8]
-                        if buttons.setdefault(but) is not None:
-                            word=word+buttons.setdefault(but)
-                        else:
-                            word=word+'?'
-                return word
-            else:
-                return 0
-
-        class temperature:
-            def __init__(self):
-                self.t=0
-                self.h=0
-
-        def TempDecode(b):
-            p=re.compile('1+')
-            ps=re.compile('10{20,22}')
-            p1=re.compile('10{4,6}')
-            p0=re.compile('10{8,10}')
-            a=p1.sub('one',p0.sub('null',ps.sub('s',p.sub('1',human_bin(b))))).replace('null','0').replace('one','1').split('s')
-            temp=temperature()
-            if a:
-                dpack=dict([[x,a.count(x)] for x in set(a)])
-                # сортировать по кол-ву повторов сообщения
-                sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
-                # вернуть сообщение ктр чаще повторилось
-                buffer=sorted_dpack[len(sorted_dpack)-1][0][4:]
-                len_buf=len(buffer)
-                rez=[]
+    def TriStateCode(self,b):
+        buttons={'10001000':'0','11101110':'1','10001110':'f'}
+        a=self.HumanBin(b).replace('11111111','')
+        a=a.split('10000000000000000000000000000000')[1:]
+        if a:
+            dpack=dict([[x,a.count(x)] for x in set(a)])
+            # сортировать по кол-ву повторов сообщения
+            sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
+            # вернуть сообщение ктр чаще повторилось
+            buffer=sorted_dpack[len(sorted_dpack)-1][0]
+            word=''
+            len_buf=len(buffer)
+            if len_buf%8==0:
                 for i in range(0,len_buf/8):
-                    b=buffer[i*8:i*8+8]
-                    rez.append(int(b,2))
-                if len(rez)==4:
-                    if rez[1]==112:
-                        temp.t=(0-rez[2])/10.0
-                    elif rez[1]==127:
-                        temp.t=(255-rez[2])/10.0
-                    elif rez[1]==126:
-                        temp.t=(511-rez[2])/10.0
+                    but=buffer[i*8:i*8+8]
+                    if buttons.setdefault(but) is not None:
+                        word=word+buttons.setdefault(but)
                     else:
-                        temp.t=(-255-rez[2])/10.0
-                    temp.h=255-rez[3]
-                    #print rez
-                #return temp
-                return str(temp.t)+':'+str(temp.h)
-            else:
-                return 0
+                        word=word+'?'
+            return word
+        else:
+            return 0
 
-        def human_bin(buf):
-            a=''
-            b=[]
-            for x in buf:
-                b.append(x)
-            for i in range(0,len(b)):
-                b[i]=bin(int(b[i],16))
-                b[i]=b[i][2:]
-                b[i]=(8-len(b[i]))*'0'+b[i]
-                a=a+b[i]
-            return a
-        # Соответствие номеру конфигурации и функции обработки сообщения
-        def buffer_convert(x):
-            return {
-                4: LevoloButton,
-                5: TriStateCode,
-                6: TriStateCode,
-                7: TempDecode,
-            }.get(x, TriStateCode)
+    class temperature:
+        def __init__(self):
+            self.t=0
+            self.h=0
 
+    def TempDecode(self,b):
+        p=re.compile('1+')
+        ps=re.compile('10{20,22}')
+        p1=re.compile('10{4,6}')
+        p0=re.compile('10{8,10}')
+        a=p1.sub('one',p0.sub('null',ps.sub('s',p.sub('1',self.HumanBin(b))))).replace('null','0').replace('one','1').split('s')
+        temp=self.temperature()
+        if a:
+            dpack=dict([[x,a.count(x)] for x in set(a)])
+            # сортировать по кол-ву повторов сообщения
+            sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
+            # вернуть сообщение ктр чаще повторилось
+            buffer=sorted_dpack[len(sorted_dpack)-1][0][4:]
+            len_buf=len(buffer)
+            rez=[]
+            for i in range(0,len_buf/8):
+                b=buffer[i*8:i*8+8]
+                rez.append(int(b,2))
+            if len(rez)==4:
+                if rez[1]==112:
+                    temp.t=(0-rez[2])/10.0
+                elif rez[1]==127:
+                    temp.t=(255-rez[2])/10.0
+                elif rez[1]==126:
+                    temp.t=(511-rez[2])/10.0
+                else:
+                    temp.t=(-255-rez[2])/10.0
+                temp.h=255-rez[3]
+                #print rez
+            #return temp
+            return str(temp.t)+':'+str(temp.h)
+        else:
+            return 0
+
+    # mapping settings and functions for receive
+    recv_func_dict={
+        4: LevoloButton,
+        5: TriStateCode,
+        6: TriStateCode,
+        7: TempDecode,
+        }
+
+    def HumanBin(self,buf):
+        a=''
+        b=[]
+        for x in buf:
+            b.append(x)
+        for i in range(0,len(b)):
+            b[i]=bin(int(b[i],16))
+            b[i]=b[i][2:]
+            b[i]=(8-len(b[i]))*'0'+b[i]
+            a=a+b[i]
+        return a
+
+    # Соответствие номеру конфигурации и функции обработки сообщения
+    def BufferConvert(self,x):
+        # mapping settings and functions for receive
+        recv_func_dict={
+            4: self.LevoloButton,
+            5: self.TriStateCode,
+            6: self.TriStateCode,
+            7: self.TempDecode,
+            }
+        return recv_func_dict.get(x, self.TriStateCode)
+
+    def RssiDbm(self,x):
+        rssi_offset=74
+        if x>=128:
+            rssi=(x-256)/2-rssi_offset
+        else:
+            rssi=(x/2)-rssi_offset
+        return rssi
+
+    def ScanDataRate(self,start,end,step):
+        dr=start
+        while dr<end:
+            self.DataRate(dr)
+            print(str(dr))
+            dr+=step
+            time.sleep(self.scan_timeout)
+
+    def ScanFreq(self,start,end,step):
+        freq=start
+        while freq<end:
+            self.Freq(freq)
+            print(str(freq))
+            freq+=step
+            time.sleep(self.scan_timeout)
+
+    def Receive(self):
         if not self.GDO0State:
             self.GDO0Open()
 
-        def rssi_dbm(x):
-            rssi_offset=74
-            if x>=128:
-                rssi=(x-256)/2-rssi_offset
-            else:
-                rssi=(x/2)-rssi_offset
-            return rssi
-
         def run():
-            packet_len=1500
             buffer=[]
             self.FlushRX()
             self.Srx()
@@ -841,17 +891,17 @@ class cc1101:
             events=self.epoll_obj.poll()
             self.RSSI=self.ReadStatus('RSSI')[1]
             #print(self.RSSI)
-            print('RSSI: '+str(rssi_dbm(int(self.RSSI,0)))+' db')
+            print('RSSI: '+str(self.RssiDbm(int(self.RSSI,0)))+' db')
             while True:
                 bytes=int(self.ReadStatus('RXBYTES')[1],16)
                 #Читать кол-во байт, пока не повторится. стр. 56
                 while bytes!=int(self.ReadStatus('RXBYTES')[1],16):
                     bytes=int(self.ReadStatus('RXBYTES')[1],16)
-                if sum_bytes+bytes>=packet_len:
-                    kol=packet_len-len(buffer)
+                if sum_bytes+bytes>=self.packet_len:
+                    kol=self.packet_len-len(buffer)
                     buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                    #print human_bin(buffer)
-                    return buffer_convert(self.config)(buffer) 
+                    #print self.HumanBin(buffer)
+                    return self.BufferConvert(self.config)(buffer)
                     break
                 else:
                 #bytes-1 потому что нельзя считывать последний байт 
@@ -863,8 +913,8 @@ class cc1101:
                         part_str+=i
                     if ('0xff0xff0xff' in part_str):
                         #print 'ff'
-                        #print human_bin(buffer)
-                        return buffer_convert(self.config)(buffer) 
+                        #print self.HumanBin(buffer)
+                        return self.BufferConvert(self.config)(buffer)
                         break
                     buffer+=part
                     sum_bytes+=bytes-1
@@ -876,30 +926,6 @@ class cc1101:
             return rez
         except KeyboardInterrupt:
             self.GDO0Close()
-
-    def scan_datarate(self,start,end,step):
-        dr=start
-        while dr<end:
-            self.DataRate(dr)
-            print(str(dr))
-            dr+=step
-            time.sleep(8)
-
-    def scan_freq(self,start,end,step):
-        freq=start
-        while freq<end:
-            self.Freq(freq)
-            print(str(freq))
-            freq+=step
-            time.sleep(8)
-
-CommandList = ['LevoloA',
-'LevoloB',
-'LevoloC',
-'LevoloD',
-'ButtonA',
-'ButtonC',
-'Marcstate']
 
 if __name__ == "__main__":
     a=cc1101(1)
