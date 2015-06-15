@@ -405,21 +405,36 @@ class cc1101:
         'SYNC0':0x84,
         'FSCAL1':0x00,
         'FSCAL0':0x1F,
-        'TEST0':0x09
+        'TEST0':0x09,
+        #'MDMCFG4':0x29,    #BW 541 Data rate 2.250
+        #'MDMCFG3':0x6A,
+        #'SYNC1':0x00,
+        #'SYNC0':0xFF,
         }
     ]
 
     def __init__(self,num):
         self.obj=spidev.SpiDev()
         self.obj.open(num,0)
-        self.GDO0State=False
-        self.state='IDLE'
-        self.config=0
+        #self.state='IDLE'
+        #self.config=0
         if num==0:
             self.GDO0Pin=self.spi0_gdo0
         if num==1:
             self.GDO0Pin=self.spi1_gdo0
         fagpio.unexport(self.GDO0Pin)
+        self.GDO0State=False
+        self.Reset()
+
+    def Reset(self):
+        if self.GDO0State:
+            self.GDO0Close()
+        self.config=0
+        r=self.Strobe('SRES')
+        while (self.Marcstate()!='IDLE'):
+            pass;
+        self.state='IDLE'
+        return r
 
     def Close(self):
         self.Reset()
@@ -432,7 +447,7 @@ class cc1101:
                 r=map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_BURST,0]))
                 break
             except IOError:
-                self.ReturnState()
+                self.Strobe('SNOP')
                 attempts+=1
         if attempts==3:
             raise IOError('ReadStatus input/output error')
@@ -458,7 +473,7 @@ class cc1101:
                 r=map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_SINGLE,0]))
                 break
             except IOError:
-                self.ReturnState()
+                self.Strobe('SNOP')
                 attempts+=1
         if attempts==3:
            raise IOError('ReadReg input/output error')
@@ -474,7 +489,7 @@ class cc1101:
                 r=map(hex,self.obj.xfer2(buffer))
                 break
             except IOError:
-                self.ReturnState()
+                self.Strobe('SNOP')
                 attempts+=1
         if attempts==3:
             raise IOError('ReadBurstReg input/output error')
@@ -487,7 +502,7 @@ class cc1101:
                 r=map(hex,self.obj.xfer2([self.REGISTER[addr],val]))
                 break
             except IOError:
-                self.ReturnState()
+                self.Strobe('SNOP')
                 attempts+=1
         if attempts==3:
             raise IOError('WriteReg input/output error')
@@ -501,7 +516,7 @@ class cc1101:
                 r=map(hex,self.obj.xfer2(buffer))
                 break
             except IOError:
-                self.ReturnState()
+                self.Strobe('SNOP')
                 attempts+=1
         if attempts==3:
             raise IOError('WriteBurstReg input/output error')
@@ -533,16 +548,6 @@ class cc1101:
             if i[1]==46:
                 break
         return buffer
-
-    def Reset(self):
-        if self.GDO0State:
-            self.GDO0Close()
-        self.config=0
-        r=self.Strobe('SRES')
-        while (self.Marcstate()!='IDLE'):
-            pass;
-        self.state='IDLE'
-        return r
 
     def GDO0Open(self):
         p=self.GDO0Pin
@@ -877,49 +882,55 @@ class cc1101:
             freq+=step
             time.sleep(self.scan_timeout)
 
+    def ReadBuffer(self):
+        buffer=[]
+        sum_bytes=0
+        while True:
+            bytes=int(self.ReadStatus('RXBYTES')[1],16)
+            #Читать кол-во байт, пока не повторится. стр. 56
+            while bytes!=int(self.ReadStatus('RXBYTES')[1],16):
+                bytes=int(self.ReadStatus('RXBYTES')[1],16)
+            if sum_bytes+bytes>=self.packet_len:
+                kol=self.packet_len-len(buffer)
+                buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
+                print self.HumanBin(buffer)
+                return self.BufferConvert(self.config)(buffer)
+                break
+            else:
+            #bytes-1 потому что нельзя считывать последний байт 
+            #до окончания всей передачи. стр 56
+                part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
+                #print part
+                part_str=''
+                for i in part:
+                    part_str+=i
+                if ('0xff0xff0xff' in part_str):
+                    #print 'ff'
+                    print self.HumanBin(buffer)
+                    return self.BufferConvert(self.config)(buffer)
+                    break
+                buffer+=part
+                sum_bytes+=bytes-1
+                time.sleep(0.015)
+
     def Receive(self):
         if not self.GDO0State:
             self.GDO0Open()
 
         def run():
-            buffer=[]
             self.FlushRX()
             self.Srx()
-            flag=True
-            sum_bytes=0
             print 'start...'
-            events=self.epoll_obj.poll()
-            self.RSSI=self.ReadStatus('RSSI')[1]
-            #print(self.RSSI)
-            print('RSSI: '+str(self.RssiDbm(int(self.RSSI,0)))+' db')
             while True:
-                bytes=int(self.ReadStatus('RXBYTES')[1],16)
-                #Читать кол-во байт, пока не повторится. стр. 56
-                while bytes!=int(self.ReadStatus('RXBYTES')[1],16):
-                    bytes=int(self.ReadStatus('RXBYTES')[1],16)
-                if sum_bytes+bytes>=self.packet_len:
-                    kol=self.packet_len-len(buffer)
-                    buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                    #print self.HumanBin(buffer)
-                    return self.BufferConvert(self.config)(buffer)
-                    break
-                else:
-                #bytes-1 потому что нельзя считывать последний байт 
-                #до окончания всей передачи. стр 56
-                    part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
-                    #print part
-                    part_str=''
-                    for i in part:
-                        part_str+=i
-                    if ('0xff0xff0xff' in part_str):
-                        #print 'ff'
-                        #print self.HumanBin(buffer)
-                        return self.BufferConvert(self.config)(buffer)
+                events=self.epoll_obj.poll(1)
+                print events
+                for fileno,event in events:
+                    if fileno==self.GDO0File.fileno():
+                        self.RSSI=self.ReadStatus('RSSI')[1]
+                        #print(self.RSSI)
+                        print('RSSI: '+str(self.RssiDbm(int(self.RSSI,0)))+' db')
+                        return self.ReadBuffer()
                         break
-                    buffer+=part
-                    sum_bytes+=bytes-1
-                    time.sleep(0.015)
-
         try:
             rez=run()
             self.FlushRX()

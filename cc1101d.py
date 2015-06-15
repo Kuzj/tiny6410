@@ -31,7 +31,7 @@ def status():
     else:
         return False
 
-class ProcessThread(Thread):
+class ProcessThread(threading.Thread):
     def __init__(self):
         super(ProcessThread, self).__init__()
         self.running = True
@@ -59,8 +59,8 @@ class ProcessThread(Thread):
             while not q.empty():
                 print q.get()
 
-t = ProcessThread()
-t.start()
+#t = ProcessThread()
+#t.start()
 
 def process(value):
     """
@@ -73,6 +73,10 @@ class sock_thread(threading.Thread):
 
     def __init__(self):
         threading.Thread.__init__(self)
+        self.running=True
+
+    def stop(self):
+        self.running=False
 
     def run(self):
         sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -89,7 +93,7 @@ class sock_thread(threading.Thread):
             logging.info('Send: '+data)
             t=time.ctime()
             rez=''
-            if data in CommandList:
+            if data in cc1101.command_list:
                 methodToCall=getattr(mod1,data)
                 methodToCall()
                 conn.send(t+': Ok')
@@ -102,20 +106,40 @@ class sock_thread_out(threading.Thread):
 
     def __init__(self):
         threading.Thread.__init__(self)
+        self.running=True
+
+    def stop(self):
+        self.running=False
 
     def run(self):
-        while 1:
-            data=mod0.Receive()
-            try:
-                sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                sock.connect(SOCKFILE_OUT)
-                logging.info('Receive: '+data)
-                sock.send(data)
-                sock.recv(1024)
-                sock.close()
-            except Exception,e:
-                logging.info('OpenSCADA socket error: '+str(e))
-                #raise Exception(e)
+        if not mod0.GDO0State:
+            mod0.GDO0Open()
+        mod0.FlushRX()
+        mod0.Srx()
+        while self.running:
+            logging.info('before poll')
+            events=mod0.epoll_obj.poll(5)
+            for fileno,event in events:
+                logging.info('event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(mod0.GDO0File.fileno()))
+                if fileno==mod0.GDO0File.fileno():
+                    data=mod0.ReadBuffer()
+                    logging.info('Read buffer: '+data)
+                    try:
+                        sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                        sock.connect(SOCKFILE_OUT)
+                        sock.send(data)
+                        sock.recv(1024)
+                        sock.close()
+                        logging.info('Send to socket: '+data)
+                    except Exception,e:
+                        logging.info('OpenSCADA socket error: '+str(e))
+                    mod0.FlushRX()
+                    mod0.Srx()
+                    #raise Exception(e)
+            if mod0.Marcstate()<>'RX':
+                logging.info('Flush with out read buffer')
+                mod0.FlushRX()
+                mod0.Srx()
 
 class cc1101d(Daemon):
 
@@ -139,7 +163,7 @@ if __name__ == "__main__":
                 print "Starting..."
                 logging.info('Starting...')
                 mod0=cc1101(0)
-                mod0.Init(4)
+                mod0.Init(7)
                 mod1=cc1101(1)
                 mod1.Init(4)
                 #mod1.LevoloPreSend()

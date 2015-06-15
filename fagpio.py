@@ -4,6 +4,8 @@ from subprocess import call
 import re
 
 
+#eint0 gpn0 - eint5 gpn5 eint16 gpl8 - eint20 gpl12
+#eint17 gpio130
 #global var for gpiochip
 clist=[]
 #global var for gpio
