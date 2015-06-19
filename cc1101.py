@@ -257,7 +257,7 @@ class cc1101:
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
         'PKTCTRL0':0x00,    #fixed length
-        'PKTLEN':0x40,
+        'PKTLEN':0xFF,      # 0x40
         'FSCTRL1':0x0C,
         'FREQ2':0x0C,   # 315
         'FREQ1':0x1D,
@@ -416,8 +416,6 @@ class cc1101:
     def __init__(self,num):
         self.obj=spidev.SpiDev()
         self.obj.open(num,0)
-        #self.state='IDLE'
-        #self.config=0
         if num==0:
             self.GDO0Pin=self.spi0_gdo0
         if num==1:
@@ -612,16 +610,6 @@ class cc1101:
             pass
         self.state='IDLE'
 
-    def ReturnState(self):
-        self.Strobe('SNOP')
-        #st=self.state
-        #time.sleep(0.01)
-        #self.Sidle()
-        #if st=='RX':
-        #    self.Srx()
-        #elif st=='TX':
-        #    self.Stx()
-
     def FlushRX(self):
         self.Sidle()
         self.Strobe('SFRX')
@@ -669,16 +657,16 @@ class cc1101:
 
     def ButtonB(self):
         self.CheckSettings(3)
-        len_pack=255
-        self.WriteReg('PKTLEN',len_pack)
+        #len_pack=255
+        #self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0x88,0xEE,0x88]
         big_packet=self.IncPacket(packet,len_pack)
         self.Send2(big_packet)
 
     def ButtonA(self):
         self.CheckSettings(3)
-        len_pack=255
-        self.WriteReg('PKTLEN',len_pack)
+        #len_pack=255
+        #self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0x88,0x88,0xEE]
         big_packet=self.IncPacket(packet,len_pack)
         self.Send2(big_packet)
@@ -690,10 +678,6 @@ class cc1101:
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0xEE,0x88,0x88]
         big_packet=self.IncPacket(packet,len_pack)
         self.Send2(big_packet)
-
-    def LevoloPreSend(self):
-        self.WriteReg('MDMCFG2',0x30) #ASK, No preamble/sync
-        self.WriteReg('PKTCTRL0',0x02) #Normal mode, infinite packet
 
     def IncPacket(self,pack,size):
         new_packet=[]
