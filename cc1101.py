@@ -556,7 +556,7 @@ class cc1101:
         self.GDO0File=p_obj.fileobj
         self.epoll_obj.register(self.GDO0File, select.EPOLLET)
         self.GDO0State=True
-        self.epoll_obj.poll(0.01)
+#        self.epoll_obj.poll(0.01)
 
     def GDO0Close(self):
         self.epoll_obj.close()

@@ -8,6 +8,7 @@ import os
 import socket
 import threading
 import Queue
+import fagpio
 
 PIDFILE = '/var/run/daqd/daqd.pid'
 LOGFILE = '/var/log/daqd/daqd.log'
@@ -17,6 +18,7 @@ SOCKFILE_OUT = '/var/run/daqd/daqd_out.sock'
 FORMAT="%(asctime)-15s %(message)s"
 logging.basicConfig(filename=LOGFILE,level=logging.DEBUG,format=FORMAT)
 debug=False
+#debug=True
 
 def status():
     try:
@@ -142,13 +144,41 @@ class sock_thread_out(threading.Thread):
                 mod0.FlushRX()
                 mod0.Srx()
 
+class sock_thread_gpio(threading.Thread):
+
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.running=True
+
+    def stop(self):
+        self.running=False
+
+    def run(self):
+        while self.running:
+            events=g130.epoll_obj.poll(5)
+            if debug:logging.info('no event')
+            for fileno,event in events:
+                if debug:logging.info('event file:'+str(fileno)+' event:'+str(event)+' file:'+str(g130.fvalue.fileno()))
+                if fileno==g130.fvalue.fileno():
+                    data=str(g130.value)
+                    logging.info('gpio130: '+data)
+                    try:
+                        sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                        sock.connect(SOCKFILE_OUT)
+                        sock.send(data)
+                        sock.recv(1024)
+                        sock.close()
+                        logging.info('Send to socket: '+data)
+                    except Exception,e:
+                        logging.info('OpenSCADA socket error: '+str(e))
+
 class daqd(Daemon):
 
     def run(self):
         try:
             sock=sock_thread()
             sock.start()
-            sock_out=sock_thread_out()
+            sock_out=sock_thread_gpio()
             sock_out.start()
             sock.join()
             sock_out.join()
@@ -163,6 +193,10 @@ if __name__ == "__main__":
             try:
                 print "Starting..."
                 logging.info('Starting...')
+                num=130
+                fagpio.export(num)
+                g130=fagpio.gpio(num)
+                g130.setedge('rising')
                 mod0=cc1101(0)
                 mod0.Init(7)
                 mod1=cc1101(1)
@@ -172,8 +206,9 @@ if __name__ == "__main__":
             except:
                 pass
         elif 'stop' == sys.argv[1]:
-                print "Stopping ..."
+                print "Stoping ..."
                 try:
+                    fagpio.unexport(130)
                     os.remove(SOCKFILE)
                     mod0=cc1101(0)
                     mod0.Close()
@@ -182,7 +217,7 @@ if __name__ == "__main__":
                 except OSError:
                     pass
                 daemon.stop()
-                logging.info('Stopping...')
+                logging.info('Stoping...')
 
         elif 'restart' == sys.argv[1]:
                 print "Restaring ..."
