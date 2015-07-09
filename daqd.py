@@ -9,16 +9,20 @@ import socket
 import threading
 import Queue
 import fagpio
+import sqlite3
+import traceback
+from os.path import isfile
 
 PIDFILE = '/var/run/daqd/daqd.pid'
 LOGFILE = '/var/log/daqd/daqd.log'
 SOCKFILE = '/var/run/daqd/daqd.sock'
 SOCKFILE_OUT = '/var/run/daqd/daqd_out.sock'
+DBFILE = './MainSt.db'
 # Configure logging
 FORMAT="%(asctime)-15s %(message)s"
 logging.basicConfig(filename=LOGFILE,level=logging.DEBUG,format=FORMAT)
-debug=False
-#debug=True
+#debug=False
+debug=True
 
 def status():
     try:
@@ -146,22 +150,30 @@ class sock_thread_out(threading.Thread):
 
 class sock_thread_gpio(threading.Thread):
 
-    def __init__(self):
+    def __init__(self,id,gpio,edge):
         threading.Thread.__init__(self)
         self.running=True
+        self.id=id
+        self.gpio=gpio
+        self.edge=edge
 
     def stop(self):
         self.running=False
 
     def run(self):
+        gpio=fagpio.gpio(self.gpio)
+        gpio.edge=self.edge
+        gpio.direction='out'
+        s_id=str(self.id)
+        s_gpio=str(self.gpio)
         while self.running:
-            events=g130.epoll_obj.poll(5)
-            if debug:logging.info('no event')
+            events=gpio.epoll_obj.poll(5)
+            if debug:logging.info('sensor id ' + s_id + ': no event')
             for fileno,event in events:
-                if debug:logging.info('event file:'+str(fileno)+' event:'+str(event)+' file:'+str(g130.fvalue.fileno()))
-                if fileno==g130.fvalue.fileno():
-                    data=str(g130.value)
-                    logging.info('gpio130: '+data)
+                if debug:logging.info('event file:'+str(fileno)+' event:'+str(event)+' file:'+str(gpio.fvalue.fileno()))
+                if fileno==gpio.fvalue.fileno():
+                    data=s_id+':'+str(gpio.value)
+                    logging.info('sensor id ' + s_id + ' gpio ' + s_gpio + ': ' + data)
                     try:
                         sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                         sock.connect(SOCKFILE_OUT)
@@ -171,6 +183,7 @@ class sock_thread_gpio(threading.Thread):
                         logging.info('Send to socket: '+data)
                     except Exception,e:
                         logging.info('OpenSCADA socket error: '+str(e))
+        logging.info('Stop thread for sensor '+s_id+' on gpio '+s_gpio+' with edge '+ self.edge)
 
 class daqd(Daemon):
 
@@ -178,37 +191,53 @@ class daqd(Daemon):
         try:
             sock=sock_thread()
             sock.start()
-            sock_out=sock_thread_gpio()
-            sock_out.start()
-            sock.join()
-            sock_out.join()
+            #sock.join()
+            sock_out_list=[]
+            for id,num,edge in int_daqd_gpio:
+                sock_out=sock_thread_gpio(id,num,edge)
+                sock_out_list.append(sock_out)
+                sock_out.start()
+                #sock_out.join()
+                logging.info('Start thread for sensor '+str(id)+' on gpio '+str(num)+' with edge '+edge)
+                time.sleep(0.5)
+            #sock_out.start()
+            #sock_out.join()
         # Logging errors and exceptions
         except Exception, e:
             logging.exception('Exception will be captured and added to the log file automaticaly')
 
 if __name__ == "__main__":
     daemon = daqd(PIDFILE)
+    if isfile(DBFILE):
+        conn=sqlite3.connect(DBFILE)
+    else:
+        print(DBFILE+' file is not exist')
+        logging.info(DBFILE+' file is not exist')
+        raise
+    int_daqd_gpio=[]
+    cur=conn.cursor()
+    cur.execute('select t.sensor_id,t.gpio_number,e.value from interface_daqd_gpio t, gpio_edge e, sensors s where t.sensor_id=s.id and t.edge_id=e.id and s.enable=1')
+    for row in cur:
+        int_daqd_gpio.append(row)
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
-            try:
-                print "Starting..."
-                logging.info('Starting...')
-                num=130
-                fagpio.export(num)
-                g130=fagpio.gpio(num)
-                g130.setedge('rising')
-                mod0=cc1101(0)
-                mod0.Init(7)
-                mod1=cc1101(1)
-                mod1.Init(4)
-                #mod1.LevoloPreSend()
-                daemon.start()
-            except:
-                pass
+            print "Starting..."
+            logging.info('Starting...')
+            for row in int_daqd_gpio:
+                fagpio.export(row[1])
+                logging.info('Export '+str(row[1])+' gpio')
+            mod0=cc1101(0)
+            mod0.Init(7)
+            mod1=cc1101(1)
+            mod1.Init(4)
+            daemon.start()
         elif 'stop' == sys.argv[1]:
                 print "Stoping ..."
+                conn.close()
                 try:
-                    fagpio.unexport(130)
+                    for row in int_daqd_gpio:
+                        fagpio.unexport(row[1])
+                        logging.info('Unxport '+str(row[1])+' gpio')
                     os.remove(SOCKFILE)
                     mod0=cc1101(0)
                     mod0.Close()
@@ -218,7 +247,6 @@ if __name__ == "__main__":
                     pass
                 daemon.stop()
                 logging.info('Stoping...')
-
         elif 'restart' == sys.argv[1]:
                 print "Restaring ..."
                 daemon.restart()
