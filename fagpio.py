@@ -88,12 +88,6 @@ class gpio(object):
                     self.fvalue.close()
                 except:
                     pass
-                #time.sleep(0.5)
-                #printlist()
-                #unexport(self.name)
-                #printlist()
-                #export(self.name)
-                #printlist()
                 if val=='in' and os.access(gpio_path+self.name+'/value', os.W_OK):
                     self.fvalue=open(gpio_path+self.name+'/value')
                 if val=='out' and os.access(gpio_path+self.name+'/value', os.W_OK):
@@ -112,11 +106,8 @@ class gpio(object):
     direction=property(getdirection,setdirection)
 
     def getvalue(self):
-        #if os.access(gpio_path+self.name+'/value', os.R_OK):
-        #    fvalue=open(gpio_path+self.name+'/value')
             self._value=int(self.fvalue.read(1))
             self.fvalue.seek(0)
-        #    fvalue.close()
             return self._value
 
     def setvalue(self,val):
@@ -150,6 +141,7 @@ class gpio(object):
                 fedge=open(gpio_path+self.name+'/edge','w+',0)
                 fedge.write(val)
                 fedge.close()
+                #Только после этого начинает ловить события
                 self.epoll_obj.poll(0.01)
                 return True
             else:
@@ -170,12 +162,10 @@ class gpio(object):
 def export(num):
     if not isexport(num):
         call(["gpio-admin","export",str(num)])
-        #time.sleep(0.5)
 
 def unexport(num):
     if isexport(num):
         call(["gpio-admin","unexport",str(num)])
-        #time.sleep(0.5)
 
 def isexport(num):
     if (num in range(0,203)) and (os.access(gpio_path+str(num), os.R_OK)):
