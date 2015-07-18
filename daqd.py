@@ -51,30 +51,43 @@ class ProcessThread(threading.Thread):
         self.running = False
 
     def run(self):
+        if debug:logging.info('Queue thread run')
         q = self.q
         while self.running:
             try:
                 # block for 1 second only:
-                value = q.get(block=True, timeout=1)
+                value = q.get(block=True, timeout=3)
                 process(value)
             except Queue.Empty:
-                sys.stdout.write('.')
-                sys.stdout.flush()
+                pass
+        #        if debug:logging.info('Queue empty')
+        #        sys.stdout.write('.')
+        #        sys.stdout.flush()
         #
         if not q.empty():
             print "Elements left in the queue:"
             while not q.empty():
                 print q.get()
 
-#t = ProcessThread()
-#t.start()
 
 def process(value):
     """
     Implement this. Do something useful with the received data.
     """
-    print value
-    sleep(randint(1,9))    # emulating processing time
+    logging.info('process value')
+    try:
+        sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(SOCKFILE_OUT)
+        sock.send(value)
+        sock.recv(1024)
+        sock.close()
+        logging.info('Send to socket: '+value)
+    except Exception,e:
+        logging.info('OpenSCADA socket error: '+str(e))
+
+    #print value
+    #sleep(randint(1,9))    # emulating processing time
+
 
 class sock_thread(threading.Thread):
 
@@ -109,7 +122,7 @@ class sock_thread(threading.Thread):
                 conn.send(t+': Not in command list')
                 logging.info('Command from socket not in command list')
 
-class sock_thread_out(threading.Thread):
+class sock_thread_cc1101(threading.Thread):
 
     def __init__(self):
         threading.Thread.__init__(self)
@@ -131,6 +144,7 @@ class sock_thread_out(threading.Thread):
                 if fileno==mod0.GDO0File.fileno():
                     data=mod0.ReadBuffer()
                     logging.info('Receive from cc1101: '+data)
+                    #sock_send_queue.add(data)
                     try:
                         sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                         sock.connect(SOCKFILE_OUT)
@@ -168,30 +182,35 @@ class sock_thread_gpio(threading.Thread):
         s_gpio=str(self.gpio)
         while self.running:
             events=gpio.epoll_obj.poll(5)
-            if debug:logging.info('sensor id ' + s_id + ': no event')
+            #if debug:logging.info('sensor id ' + s_id + ': no event')
             for fileno,event in events:
                 if debug:logging.info('event file:'+str(fileno)+' event:'+str(event)+' file:'+str(gpio.fvalue.fileno()))
                 if fileno==gpio.fvalue.fileno():
                     data=s_id+':'+str(gpio.value)
                     logging.info('sensor id ' + s_id + ' gpio ' + s_gpio + ': ' + data)
-                    try:
-                        sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                        sock.connect(SOCKFILE_OUT)
-                        sock.send(data)
-                        sock.recv(1024)
-                        sock.close()
-                        logging.info('Send to socket: '+data)
-                    except Exception,e:
-                        logging.info('OpenSCADA socket error: '+str(e))
+                    sock_send_queue.add(data)
+                    #try:
+                    #    sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    #    sock.connect(SOCKFILE_OUT)
+                    #    sock.send(data)
+                    #    sock.recv(1024)
+                    #    sock.close()
+                    #    logging.info('Send to socket: '+data)
+                    #except Exception,e:
+                    #    logging.info('OpenSCADA socket error: '+str(e))
         logging.info('Stop thread for sensor '+s_id+' on gpio '+s_gpio+' with edge '+ self.edge)
 
 class daqd(Daemon):
 
     def run(self):
         try:
+            sock_send_queue = ProcessThread()
+            sock_send_queue.start()
             sock=sock_thread()
             sock.start()
             #sock.join()
+            sock_cc1101=sock_thread_cc1101()
+            sock_cc1101.start()
             sock_out_list=[]
             for id,num,edge in int_daqd_gpio:
                 sock_out=sock_thread_gpio(id,num,edge)

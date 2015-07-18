@@ -1,8 +1,10 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*- from __future__ import unicode_literals
 import os
 from subprocess import call
 import re
 import select
+import time
 
 #eint0 gpn0 - eint5 gpn5 eint16 gpl8 - eint20 gpl12
 #eint17 gpio130
@@ -81,14 +83,24 @@ class gpio(object):
                 fdir=open(gpio_path+self.name+'/direction','w+',0)
                 fdir.write(val)
                 fdir.close()
-                try: 
+                try:
+                    self.epoll_obj.unregister(self.fvalue)
                     self.fvalue.close()
                 except:
                     pass
+                #time.sleep(0.5)
+                #printlist()
+                #unexport(self.name)
+                #printlist()
+                #export(self.name)
+                #printlist()
                 if val=='in' and os.access(gpio_path+self.name+'/value', os.W_OK):
                     self.fvalue=open(gpio_path+self.name+'/value')
                 if val=='out' and os.access(gpio_path+self.name+'/value', os.W_OK):
                     self.fvalue=open(gpio_path+self.name+'/value','w+',0)
+                if os.access(gpio_path+self.name+'/edge', os.W_OK) and val=='in':
+                    self.epoll_obj=select.epoll()
+                    self.epoll_obj.register(self.fvalue,select.EPOLLET)
                 return True
             else:
                 print('Access denied')
@@ -138,6 +150,7 @@ class gpio(object):
                 fedge=open(gpio_path+self.name+'/edge','w+',0)
                 fedge.write(val)
                 fedge.close()
+                self.epoll_obj.poll(0.01)
                 return True
             else:
                 print('Do not exist edge file in '+ self.name)
@@ -150,16 +163,19 @@ class gpio(object):
 
     @property
     def fileobj(self):
-        f=open(gpio_path+self.name+'/value','w+')
-        return f
+        if os.access(gpio_path+self.name+'/value', os.W_OK):
+           f=open(gpio_path+self.name+'/value','w+')
+           return f
 
 def export(num):
     if not isexport(num):
         call(["gpio-admin","export",str(num)])
+        #time.sleep(0.5)
 
 def unexport(num):
     if isexport(num):
         call(["gpio-admin","unexport",str(num)])
+        #time.sleep(0.5)
 
 def isexport(num):
     if (num in range(0,203)) and (os.access(gpio_path+str(num), os.R_OK)):

@@ -551,12 +551,12 @@ class cc1101:
         p=self.GDO0Pin
         fagpio.export(p)
         p_obj=fagpio.gpio(p)
+        p_obj.active=0
+        p_obj.direction='in'
         p_obj.edge='rising'
-        self.epoll_obj=select.epoll()
-        self.GDO0File=p_obj.fileobj
-        self.epoll_obj.register(self.GDO0File, select.EPOLLET)
+        self.GDO0File=p_obj.fvalue
+        self.epoll_obj=p_obj.epoll_obj
         self.GDO0State=True
-#        self.epoll_obj.poll(0.01)
 
     def GDO0Close(self):
         self.epoll_obj.close()
@@ -833,7 +833,6 @@ class cc1101:
 
     # Соответствие номеру конфигурации и функции обработки сообщения
     def BufferConvert(self,x):
-        # mapping settings and functions for receive
         recv_func_dict={
             4: self.LevoloButton,
             5: self.TriStateCode,
@@ -907,7 +906,7 @@ class cc1101:
             print 'start...'
             while True:
                 events=self.epoll_obj.poll(1)
-                print events
+                #print events,self.GDO0File.fileno()
                 for fileno,event in events:
                     if fileno==self.GDO0File.fileno():
                         self.RSSI=self.ReadStatus('RSSI')[1]
