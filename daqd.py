@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*- from __future__ import unicode_literals
 from daemon import Daemon
 from cc1101 import *
 import sys
@@ -21,8 +22,8 @@ DBFILE = './MainSt.db'
 # Configure logging
 FORMAT="%(asctime)-15s %(message)s"
 logging.basicConfig(filename=LOGFILE,level=logging.DEBUG,format=FORMAT)
-debug=False
-#debug=True
+#debug=False
+debug=True
 
 def status():
     try:
@@ -68,18 +69,36 @@ class ProcessThread(threading.Thread):
 
 
 def process(value):
-    """
-    Implement this. Do something useful with the received data.
-    """
+    def xml_str(sensor_id,data,action_id):
+        return '<?xml version="1.0" encoding="utf-8"?>\n<PACKAGE>\n<SENSOR sensor_id="'+str(sensor_id)+'" message="'+data+'" action_id="'+str(action_id)+'"/>\n</PACKAGE>'
+    def send(sensor_id,value,action_id):
+        try:
+            sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(SOCKFILE_OUT)
+            sock.send(xml_str(sensor_id,value,action_id))
+            sock.recv(1024)
+            sock.close()
+            logging.info('Send to socket: '+str(sensor_id)+'|'+value+'|'+str(action_id))
+        except Exception,e:
+            logging.info('OpenSCADA socket error: '+str(e))
+
     try:
-        sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.connect(SOCKFILE_OUT)
-        sock.send(value)
-        sock.recv(1024)
-        sock.close()
-        logging.info('Send to socket: '+value)
+        # Так как датчик может передовать только информацию, без опозновательных сигналов:
+        # Считать количество датчиков на одной настройке cc1101 
+        cur.execute('select count(*) from interface_daqd_cc1101 where config_num=?',str(mod0.config))
+        count=cur.fetchone()[0]
+        # Если настройка cc1101 используется только для одного датчика, то брать sensor_id по номеру настройки
+        if count==1:
+            cur.execute('select s.id, s.action_id from sensors s, interface_daqd_cc1101 c where s.id=c.sensor_id and c.config_num=?',str(mod0.config))
+            sensor_id,action_id=cur.fetchone()
+            send(sensor_id,value,action_id)
+        # Если больше одного датчика используют одну настройку, то брать sensor_id по сообщению передоваемого датчиком 
+        elif count>1:
+            cur.execute('select s.id, s.action_id from sensors s, interface_daqd_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(mod0.config))
+            sensor_id,action_id=cur.fetchone()
+            send(sensor_id,value,action_id)
     except Exception,e:
-        logging.info('OpenSCADA socket error: '+str(e))
+        logging.info('process: '+str(e))
 
 class sock_thread(threading.Thread):
 
@@ -122,6 +141,7 @@ class sock_thread_cc1101(threading.Thread):
 
     def stop(self):
         self.running=False
+
 
     def run(self):
         if not mod0.GDO0State:
@@ -199,7 +219,7 @@ class daqd(Daemon):
 if __name__ == "__main__":
     daemon = daqd(PIDFILE)
     if isfile(DBFILE):
-        conn=sqlite3.connect(DBFILE)
+        conn=sqlite3.connect(DBFILE,check_same_thread=False)
     else:
         print(DBFILE+' file is not exist')
         logging.info(DBFILE+' file is not exist')
