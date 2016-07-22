@@ -443,7 +443,7 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_BURST,0]))
+                r=list(map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_BURST,0])))
                 break
             except IOError:
                 self.Strobe('SNOP')
@@ -456,7 +456,7 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=map(hex,self.obj.xfer2([self.REGISTER[addr]]))
+                r=list(map(hex,self.obj.xfer2([self.REGISTER[addr]])))
                 break
             except IOError:
                 time.sleep(0.5)
@@ -469,7 +469,7 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_SINGLE,0]))
+                r=list(map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_SINGLE,0])))
                 break
             except IOError:
                 self.Strobe('SNOP')
@@ -485,7 +485,7 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=map(hex,self.obj.xfer2(buffer))
+                r=list(map(hex,self.obj.xfer2(buffer)))
                 break
             except IOError:
                 self.Strobe('SNOP')
@@ -498,7 +498,7 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=map(hex,self.obj.xfer2([self.REGISTER[addr],val]))
+                r=list(map(hex,self.obj.xfer2([self.REGISTER[addr],val])))
                 break
             except IOError:
                 self.Strobe('SNOP')
@@ -512,7 +512,7 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=map(hex,self.obj.xfer2(buffer))
+                r=list(map(hex,self.obj.xfer2(buffer)))
                 break
             except IOError:
                 self.Strobe('SNOP')
@@ -539,7 +539,7 @@ class cc1101:
 
     def PrintSettings(self):
         buffer=[]
-        print 'settings number is: '+str(self.config)
+        print('settings number is: '+str(self.config))
         sort_register=sorted(self.REGISTER.items(), key=operator.itemgetter(1))
         for i in sort_register:
             buffer.append(i[0])
@@ -634,20 +634,20 @@ class cc1101:
         while cur<len_buffer:
             if cur>threshold and flag:
                 self.WriteReg('PKTCTRL0',0x00)
-                print "Turn to fixed packet length with threshold is %s" % threshold
+                print("Turn to fixed packet length with threshold is %s" % threshold)
                 flag=False
             time.sleep(0.012)
             sum=64-int(self.ReadStatus('TXBYTES')[1],16)
-            print sum,cur
+            print(sum,cur)
             if sum>0:
                 if (cur+sum)<len_buffer:
                     self.WriteBurstReg('TXFIFO',buffer[cur:cur+sum])
                 else:
                     self.WriteBurstReg('TXFIFO',buffer[cur:len_buffer+1])
-                    print len_buffer-cur,len_buffer
-                    #print self.ReadStatus('MARCSTATE')
+                    print(len_buffer-cur,len_buffer)
+                    #print(self.ReadStatus('MARCSTATE'))
                     self.Sidle()
-                    #print self.ReadStatus('MARCSTATE')
+                    #print(self.ReadStatus('MARCSTATE'))
                     break
             else:
                 self.FlushTX()
@@ -826,7 +826,7 @@ class cc1101:
                 else:
                     temp.t=(-255-rez[2])/10.0
                 temp.h=255-rez[3]
-                #print rez
+                #print(rez)
             #return temp
             return str(temp.t)+':'+str(temp.h)
         else:
@@ -897,20 +897,20 @@ class cc1101:
             if sum_bytes+bytes>=self.packet_len:
                 kol=self.packet_len-len(buffer)
                 buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                print self.HumanBin(buffer)
+                print(self.HumanBin(buffer))
                 return self.BufferConvert(self.config)(buffer)
                 break
             else:
             #bytes-1 потому что нельзя считывать последний байт 
             #до окончания всей передачи. стр 56
                 part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
-                #print part
+                #print(part)
                 part_str=''
                 for i in part:
                     part_str+=i
                 if ('0xff0xff0xff' in part_str):
-                    #print 'ff'
-                    print self.HumanBin(buffer)
+                    #print('ff')
+                    print(self.HumanBin(buffer))
                     return self.BufferConvert(self.config)(buffer)
                     break
                 buffer+=part
@@ -924,10 +924,10 @@ class cc1101:
         def run():
             self.FlushRX()
             self.Srx()
-            print 'start...'
+            print('start...')
             while True:
                 events=self.epoll_obj.poll(1)
-                #print events,self.GDO0File.fileno()
+                #print(events,self.GDO0File.fileno())
                 for fileno,event in events:
                     if fileno==self.GDO0File.fileno():
                         self.RSSI=self.ReadStatus('RSSI')[1]

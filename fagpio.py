@@ -111,7 +111,7 @@ class gpio(object):
             return self._value
 
     def setvalue(self,val):
-        if self.direction=='out' and self.fvalue.mode<>'w+':
+        if self.direction=='out' and self.fvalue.mode!='w+':
             self.fvalue.close()
             self.fvalue=open(gpio_path+self.name+'/value','w+',0)
         if val in range(0,2):
