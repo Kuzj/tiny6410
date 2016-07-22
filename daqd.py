@@ -63,7 +63,7 @@ class ProcessThread(threading.Thread):
         #        sys.stdout.write('.')
         #        sys.stdout.flush()
         if not q.empty():
-            print "Elements left in the queue:"
+            print("Elements left in the queue:")
             while not q.empty():
                 logging.info('Element in queue: '+q.get())
 
@@ -159,7 +159,7 @@ class sock_thread_cc1101(threading.Thread):
                     daemon.sock_send_queue.add(data)
                     mod0.FlushRX()
                     mod0.Srx()
-            if mod0.Marcstate()<>'RX':
+            if mod0.Marcstate()!='RX':
                 if debug:logging.info('Flush with out read buffer')
                 mod0.FlushRX()
                 mod0.Srx()
@@ -231,7 +231,7 @@ if __name__ == "__main__":
         int_daqd_gpio.append(row)
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
-            print "Starting..."
+            print("Starting...")
             logging.info('Starting...')
             for row in int_daqd_gpio:
                 fagpio.export(row[1])
@@ -242,7 +242,7 @@ if __name__ == "__main__":
             mod1.Init(4)
             daemon.start()
         elif 'stop' == sys.argv[1]:
-                print "Stoping ..."
+                print("Stoping ...")
                 conn.close()
                 try:
                     for row in int_daqd_gpio:
@@ -258,7 +258,7 @@ if __name__ == "__main__":
                 daemon.stop()
                 logging.info('Stoping...')
         elif 'restart' == sys.argv[1]:
-                print "Restaring ..."
+                print("Restaring ...")
                 daemon.restart()
                 logging.info('Restart...')
         elif 'status' == sys.argv[1]:
@@ -271,13 +271,13 @@ if __name__ == "__main__":
             except SystemExit:
                 pid = None
             if pid:
-                print 'daqd is running as pid %s' % pid
+                print('daqd is running as pid %s' % pid)
             else:
-                print 'daqd is not running.'
+                print('daqd is not running.')
         else:
-            print "Unknown command"
+            print("Unknown command")
             sys.exit(2)
             sys.exit(0)
     else:
-        print "usage: %s start|stop|restart|status" % sys.argv[0]
+        print("usage: %s start|stop|restart|status" % sys.argv[0])
         sys.exit(2)
