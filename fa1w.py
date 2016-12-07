@@ -5,7 +5,7 @@ import re
 dev_path='/sys/bus/w1/devices'
 master_path=dev_path+'/w1 bus master'
 NO_re=re.compile('NO')
-temp_re=re.compile('[0-9][0-9][0-9][0-9][0-9]')
+temp_re=re.compile('[0-9]{5}')
 class master(object):
     @property
     def slave_count(self):
