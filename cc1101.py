@@ -624,37 +624,42 @@ class cc1101:
         self.Stx()
 
     def Send2(self,buffer):
-        cur=64
-        len_buffer=len(buffer)
-        threshold=(len_buffer-(len_buffer % 64))
-        self.FlushTX()
-        self.WriteBurstReg('TXFIFO',buffer[0:64])
-        self.Stx()
-        flag=True
-        while cur<len_buffer:
-            if cur>threshold and flag:
-                self.WriteReg('PKTCTRL0',0x00)
-                print("Turn to fixed packet length with threshold is %s" % threshold)
-                flag=False
-            time.sleep(0.012)
-            sum=64-int(self.ReadStatus('TXBYTES')[1],16)
-            print(sum,cur)
-            if sum>0:
-                if (cur+sum)<len_buffer:
-                    self.WriteBurstReg('TXFIFO',buffer[cur:cur+sum])
+        try:
+            cur=64
+            len_buffer=len(buffer)
+            threshold=(len_buffer-(len_buffer % 64))
+            self.FlushTX()
+            self.WriteBurstReg('TXFIFO',buffer[0:64])
+            self.Stx()
+            flag=True
+            while cur<len_buffer:
+                if cur>threshold and flag:
+                    self.WriteReg('PKTCTRL0',0x00)
+                    print("Turn to fixed packet length with threshold is %s" % threshold)
+                    flag=False
+                time.sleep(0.012)
+                sum=64-int(self.ReadStatus('TXBYTES')[1],16)
+                print(sum,cur)
+                if sum>0:
+                    if (cur+sum)<len_buffer:
+                        self.WriteBurstReg('TXFIFO',buffer[cur:cur+sum])
+                    else:
+                        self.WriteBurstReg('TXFIFO',buffer[cur:len_buffer+1])
+                        print(len_buffer-cur,len_buffer)
+                        #print(self.ReadStatus('MARCSTATE'))
+                        self.Sidle()
+                        #print(self.ReadStatus('MARCSTATE'))
+                        break
                 else:
-                    self.WriteBurstReg('TXFIFO',buffer[cur:len_buffer+1])
-                    print(len_buffer-cur,len_buffer)
-                    #print(self.ReadStatus('MARCSTATE'))
-                    self.Sidle()
-                    #print(self.ReadStatus('MARCSTATE'))
-                    break
-            else:
-                self.FlushTX()
-                self.Stx()
-                sum=0
-            cur+=sum
-        self.WriteReg('PKTCTRL0',0x02)
+                    self.FlushTX()
+                    self.Stx()
+                    sum=0
+                cur+=sum
+            self.WriteReg('PKTCTRL0',0x02)
+            return True
+        except Exception, e:
+            print(str(e))
+            return False
 
     def ButtonB(self):
         self.CheckSettings(3)
@@ -662,7 +667,7 @@ class cc1101:
         self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0x88,0xEE,0x88]
         big_packet=self.IncPacket(packet,len_pack)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def ButtonA(self):
         self.CheckSettings(3)
@@ -670,7 +675,7 @@ class cc1101:
         self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0x88,0x88,0xEE]
         big_packet=self.IncPacket(packet,len_pack)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def ButtonC(self):
         self.CheckSettings(3)
@@ -678,7 +683,7 @@ class cc1101:
         self.WriteReg('PKTLEN',len_pack)
         packet=[0x80,0x00,0x00,0x00,0xEE,0xEE,0xEE,0x8E,0x88,0x8E,0x8E,0x88,0x88,0xEE,0x88,0x88]
         big_packet=self.IncPacket(packet,len_pack)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def IncPacket(self,pack,size):
         new_packet=[]
@@ -702,7 +707,7 @@ class cc1101:
         0x57, 0x55, 0x55, 0x33, 0x33, 0x54, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xaa, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd5, 0x2a]
         big_packet=self.IncPacket(packet,1000)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def LevoloB(self):
         self.CheckSettings(4)
@@ -712,7 +717,7 @@ class cc1101:
         0x57, 0x55, 0x55, 0x33, 0x33, 0x52, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xa9, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd4, 0xaa]
         big_packet=self.IncPacket(packet,1000)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def LevoloC(self):
         self.CheckSettings(4)
@@ -722,7 +727,7 @@ class cc1101:
         0x57, 0x55, 0x55, 0x33, 0x33, 0x4c, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xa6, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd3, 0x2a]
         big_packet=self.IncPacket(packet,1000)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def LevoloD(self):
         self.CheckSettings(4)
@@ -732,7 +737,7 @@ class cc1101:
         0x97, 0x55, 0x55, 0x33, 0x33, 0x4b, 0x4b, 0xaa, 0xaa, 0x99,
         0x99, 0xa5, 0xa5, 0xd5, 0x55, 0x4c, 0xcc, 0xd2, 0xd2]
         big_packet=self.IncPacket(packet,1000)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def LevoloE(self):
         self.CheckSettings(4)
@@ -742,7 +747,7 @@ class cc1101:
         0x57, 0x55, 0x55, 0x33, 0x33, 0x5a, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xad, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd6, 0xaa]
         big_packet=self.IncPacket(packet,1000)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def LevoloH(self):
         self.CheckSettings(4)
@@ -752,7 +757,7 @@ class cc1101:
         0x57, 0x55, 0x55, 0x33, 0x33, 0x56, 0xab, 0xaa, 0xaa, 0x99,
         0x99, 0xab, 0x55, 0xd5, 0x55, 0x4c, 0xcc, 0xd5, 0xaa]
         big_packet=self.IncPacket(packet,1000)
-        self.Send2(big_packet)
+        return self.Send2(big_packet)
 
     def LevoloButton(self,b):
         buttons={'10100101':'LevoloA','10010101':'LevoloB','01100101':'LevoloC','01011010':'LevoloD'}

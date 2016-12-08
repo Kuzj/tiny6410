@@ -171,6 +171,63 @@ class cc1101_control_thread(threading.Thread):
                         break
         logging.critical('cc1101 control: stop')
 
+class daqd_control_thread(threading.Thread):
+
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.running=True
+
+    def stop(self):
+        self.running=False
+
+    def run(self):
+        logging.critical('daqd control: start')
+        sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        try:
+            os.remove(SOCKFILE)
+        except OSError:
+            pass
+        try:
+            sock.bind(SOCKFILE)
+            sock.listen(1)
+        except Exception,e:
+            logging.error('daqd control: socket error: '+str(e))
+        while self.running:
+            try:
+                conn, addr=sock.accept()
+                conn.settimeout(1)
+            except socket.timeout,e:
+                logging.debug('daqd control: socket timeout')
+                continue
+            except Exception,e:
+                logging.error('daqd control: socket error: '+str(e))
+                break
+            while self.running:
+                try:
+                    data=conn.recv(sock_buffer)
+                except socket.timeout,e:
+                    continue
+                except Exception,e:
+                    logging.error(str(e))
+                else:
+                    logging.info('daqd control: receive: '+data)
+                    t=time.ctime()
+                    rez=''
+                    try:
+                        if data in cc1101.command_list:
+                            methodToCall=getattr(mod0,data)
+                            methodToCall()
+                            conn.send(t+': Ok')
+                            logging.info('cc1101 control: send on cc1101: '+data)
+                        else:
+                            conn.send(t+': not in command list')
+                            logging.error('cc1101 control: not in command list')
+                    except Exception,e:
+                        logging.error('cc1101 control: send error:'+str(e))
+                        break
+        logging.critical('cc1101 control: stop')
+
 # Прослушивание частоты настроенной на модуле CC1101
 # mod1, все что получено(data)(определяется функциями в зависимости
 # от настройки CC1101) отсылается в очередь на передачу
