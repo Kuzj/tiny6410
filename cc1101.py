@@ -20,6 +20,7 @@ class cc1101:
         'LevoloC',
         'LevoloD',
         'LevoloE',
+        'LevoloH',
         'ButtonA',
         'ButtonC',
         'Marcstate',
