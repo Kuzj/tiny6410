@@ -48,14 +48,13 @@ def status():
         return True
     else:
         return False
-# Поток для очереди куда добавляются все сообщения
-# для отправки в openscada
-# испльзуется daemon.send_sock_queue
+# Поток для очереди входящих(in) и исходящих(out) сообщений
 class queue_thread(threading.Thread):
-    def __init__(self):
+    def __init__(self,direction):
         super(queue_thread, self).__init__()
         self.running = True
         self.q = Queue.Queue()
+        self.direction=direction
 
     def add(self, data):
         self.q.put(data)
@@ -64,20 +63,27 @@ class queue_thread(threading.Thread):
         self.running = False
 
     def run(self):
-        logging.critical('queue: start')
+        logging.critical('queue '+self.direction+': start')
         while self.running:
             try:
                 # block for 1 second only:
                 value = self.q.get(block=True, timeout=1)
-                send2scada(value)
+                logging.debug('queue "'+self.direction+'" size: '+str(self.q.qsize()))
+                if self.direction=='out':
+                    send2scada(value)
+                elif self.direction=='in':
+                    exec_control(value)
             except Queue.Empty:
                 pass
-        logging.critical('queue: stop')
+        logging.critical('queue "'+self.direction+'": stop')
         if not q.empty():
-            logging.warning("queue: elements left in the queue")
+            logging.warning('queue "'+self.direction+'": elements left in the queue')
             while not q.empty():
-                logging.warning('queue: element in queue: '+q.get())
+                logging.warning('queue "'+self.direction+'": element in queue: '+q.get())
 
+def exec_control(value):
+    methodToCall=getattr(mod0,value)
+    methodToCall()
 
 def send2scada(value):
     def xml_str(sensor_id,data,action_id):
@@ -159,8 +165,7 @@ class cc1101_control_thread(threading.Thread):
                     rez=''
                     try:
                         if data in cc1101.command_list:
-                            methodToCall=getattr(mod0,data)
-                            methodToCall()
+                            daemon.queue_in.add(data)
                             conn.send(t+': Ok')
                             logging.info('cc1101 control: send on cc1101: '+data)
                         else:
@@ -216,8 +221,7 @@ class daqd_control_thread(threading.Thread):
                     rez=''
                     try:
                         if data in cc1101.command_list:
-                            methodToCall=getattr(mod0,data)
-                            methodToCall()
+                            daemon.queue_in.add(data)
                             conn.send(t+': Ok')
                             logging.info('cc1101 control: send on cc1101: '+data)
                         else:
@@ -255,7 +259,7 @@ class cc1101_com_thread(threading.Thread):
                 if fileno==mod1.GDO0File.fileno():
                     data=mod1.ReadBuffer()
                     logging.info('cc1101 communication: receive: '+data)
-                    daemon.queue.add(data)
+                    daemon.queue_out.add(data)
                     mod1.FlushRX()
                     mod1.Srx()
             if mod1.Marcstate()!='RX':
@@ -297,7 +301,7 @@ class gpio_com_thread(threading.Thread):
                 if fileno==gpio.fvalue.fileno():
                     data=s_id+':'+str(gpio.value)
                     logging.info('gpio communication: sensor id ' + s_id + ' gpio ' + s_gpio + ': ' + data)
-                    daemon.queue.add(data)
+                    daemon.queue_out.add(data)
         fagpio.unexport(self.gpio)
         logging.critical('gpio communication: unexport '+str(self.gpio)+' gpio')
         logging.critical('gpio communication: stop sensor '+s_id+' on gpio '+s_gpio+' with edge '+ self.edge)
@@ -411,8 +415,10 @@ class daqd(Daemon):
 
     def run(self):
         try:
-            self.queue = queue_thread()
-            self.queue.start()
+            self.queue_out = queue_thread('out')
+            self.queue_out.start()
+            self.queue_in = queue_thread('in')
+            self.queue_in.start()
             self.cc1101_control=cc1101_control_thread()
             self.cc1101_control.start()
             self.cc1101_com=cc1101_com_thread()
@@ -432,7 +438,8 @@ class daqd(Daemon):
 
 def sigterm_handler(signal,frame):
     logging.critical('catch SIGTERM')
-    daemon.queue.stop()
+    daemon.queue_out.stop()
+    daemon.queue_in.stop()
     daemon.cc1101_control.stop()
     daemon.cc1101_com.stop()
     daemon.elec_control.stop()
