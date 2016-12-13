@@ -15,12 +15,12 @@ class cc1101:
     spi0_gdo0=153 # eint9 gpn9
     spi1_gdo0=155 # eint11 gpn11
     packet_len=1500 # for Receive()
-    command_list = ['LevoloA',
-        'LevoloB',
-        'LevoloC',
-        'LevoloD',
-        'LevoloE',
-        'LevoloH',
+    command_list = ['LivoloA',
+        'LivoloB',
+        'LivoloC',
+        'LivoloD',
+        'LivoloE',
+        'LivoloH',
         'ButtonA',
         'ButtonC',
         'Marcstate',
@@ -284,7 +284,7 @@ class cc1101:
         'TEST0':0x09
         },
         # 4
-        # Levolo
+        # Livolo
         {
         'IOCFG0':0x06,
         'PKTCTRL1':0x00,
@@ -700,7 +700,7 @@ class cc1101:
         if self.config!=num:
             self.WriteSettings(num)
 
-    def LevoloA(self):
+    def LivoloA(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x6a, 0x95, 0x75, 0x55, 0x53, 0x33,
         0x35, 0x4a, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0xa5, 0x5d, 0x55,
@@ -710,7 +710,7 @@ class cc1101:
         big_packet=self.IncPacket(packet,1000)
         return self.Send2(big_packet)
 
-    def LevoloB(self):
+    def LivoloB(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x6a, 0x55, 0x75, 0x55, 0x53, 0x33,
         0x35, 0x2a, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0x95, 0x5d, 0x55,
@@ -720,7 +720,7 @@ class cc1101:
         big_packet=self.IncPacket(packet,1000)
         return self.Send2(big_packet)
 
-    def LevoloC(self):
+    def LivoloC(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x69, 0x95, 0x75, 0x55, 0x53, 0x33,
         0x34, 0xca, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0x65, 0x5d, 0x55,
@@ -730,7 +730,7 @@ class cc1101:
         big_packet=self.IncPacket(packet,1000)
         return self.Send2(big_packet)
 
-    def LevoloD(self):
+    def LivoloD(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x69, 0x69, 0x75, 0x55, 0x53, 0x33,
         0x34, 0xb4, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0x5a, 0x5d, 0x55,
@@ -740,7 +740,7 @@ class cc1101:
         big_packet=self.IncPacket(packet,1000)
         return self.Send2(big_packet)
 
-    def LevoloE(self):
+    def LivoloE(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x6b, 0x55, 0x75, 0x55, 0x53, 0x33,
         0x35, 0xaa, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0xd5, 0x5d, 0x55,
@@ -750,7 +750,7 @@ class cc1101:
         big_packet=self.IncPacket(packet,1000)
         return self.Send2(big_packet)
 
-    def LevoloH(self):
+    def LivoloH(self):
         self.CheckSettings(4)
         packet=[0xea, 0xaa, 0xa6, 0x66, 0x6a, 0xd5, 0x75, 0x55, 0x53, 0x33,
         0x35, 0x6a, 0xba, 0xaa, 0xa9, 0x99, 0x9a, 0xb5, 0x5d, 0x55,
@@ -760,8 +760,8 @@ class cc1101:
         big_packet=self.IncPacket(packet,1000)
         return self.Send2(big_packet)
 
-    def LevoloButton(self,b):
-        buttons={'10100101':'LevoloA','10010101':'LevoloB','01100101':'LevoloC','01011010':'LevoloD'}
+    def LivoloButton(self,b):
+        buttons={'10100101':'LivoloA','10010101':'LivoloB','01100101':'LivoloC','01011010':'LivoloD'}
         a=self.HumanBin(b).replace('11111111','') # убрать шумы если куча FF, мешает определению клавиши
         a=a.split('111')[1:]
         if a:
@@ -791,56 +791,52 @@ class cc1101:
             if len_buf%8==0:
                 for i in range(0,len_buf/8):
                     but=buffer[i*8:i*8+8]
-                    if buttons.setdefault(but) is not None:
-                        word=word+buttons.setdefault(but)
-                    else:
-                        word=word+'?'
+                    word=word+buttons.setdefault(but,'?')
             return word
         else:
             return 0
 
     class temperature:
-        def __init__(self):
-            self.t=0
-            self.h=0
+        def __init__(self,head=0,id=0,battery=0,tx=0,channel=0,t=0,h=0):
+            self.head=head
+            self.id=id
+            self.battery=battery
+            self.tx=tx
+            self.channel=channel
+            self.t=t
+            self.h=h
+            self.time=time.time()
 
     def TempDecode(self,b):
+        def toint(bin_str):
+            return int(bin_str,2)
         p=re.compile('1+')
         ps=re.compile('10{20,22}')
-        p1=re.compile('10{4,6}')
-        p0=re.compile('10{8,10}')
-        a=p1.sub('one',p0.sub('null',ps.sub('s',p.sub('1',self.HumanBin(b))))).replace('null','0').replace('one','1').split('s')
-        temp=self.temperature()
+        p0=re.compile('10{4,6}')
+        p1=re.compile('10{8,10}')
+        #print(b)
+        a=p0.sub('null',p1.sub('one',ps.sub('s',p.sub('1',self.HumanBin(b))))).replace('null','0').replace('one','1').split('s')
         if a:
             dpack=dict([[x,a.count(x)] for x in set(a)])
             # сортировать по кол-ву повторов сообщения
             sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
             # вернуть сообщение ктр чаще повторилось
-            buffer=sorted_dpack[len(sorted_dpack)-1][0][4:]
-            len_buf=len(buffer)
-            rez=[]
-            for i in range(0,len_buf/8):
-                b=buffer[i*8:i*8+8]
-                rez.append(int(b,2))
-            if len(rez)==4:
-                if rez[1]==112:
-                    temp.t=(0-rez[2])/10.0
-                elif rez[1]==127:
-                    temp.t=(255-rez[2])/10.0
-                elif rez[1]==126:
-                    temp.t=(511-rez[2])/10.0
-                else:
-                    temp.t=(-255-rez[2])/10.0
-                temp.h=255-rez[3]
-                #print(rez)
-            #return temp
-            return str(temp.t)+':'+str(temp.h)
+            buffer=sorted_dpack[len(sorted_dpack)-1][0]
+            sign=int(buffer[16:17])
+            #Если двоичный код температуры начинается с 1, то значение отрицательное(смотри дополнительный код)
+            if sign:
+                t=(~(int(buffer[16:28],2)^0xfff))/10.0
+            else:
+                t=toint(buffer[16:28])/10.0
+            temp=self.temperature(toint(buffer[0:4]),toint(buffer[4:12]),toint(buffer[12:13]),toint(buffer[13:14]),toint(buffer[14:16]),round(t,2),toint(buffer[28:36]))
+            print(temp.head,temp.id,temp.battery,temp.tx,temp.channel,temp.t,temp.h,time.ctime(temp.time))
+            return temp
         else:
             return 0
 
     # mapping settings and functions for receive
     recv_func_dict={
-        4: LevoloButton,
+        4: LivoloButton,
         5: TriStateCode,
         6: TriStateCode,
         7: TempDecode,
@@ -861,7 +857,7 @@ class cc1101:
     # Соответствие номеру конфигурации и функции обработки сообщения
     def BufferConvert(self,x):
         recv_func_dict={
-            4: self.LevoloButton,
+            4: self.LivoloButton,
             5: self.TriStateCode,
             6: self.TriStateCode,
             7: self.TempDecode,
@@ -903,7 +899,7 @@ class cc1101:
             if sum_bytes+bytes>=self.packet_len:
                 kol=self.packet_len-len(buffer)
                 buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                print(self.HumanBin(buffer))
+                #print(self.HumanBin(buffer))
                 return self.BufferConvert(self.config)(buffer)
                 break
             else:
@@ -916,7 +912,7 @@ class cc1101:
                     part_str+=i
                 if ('0xff0xff0xff' in part_str):
                     #print('ff')
-                    print(self.HumanBin(buffer))
+                    #print(self.HumanBin(buffer))
                     return self.BufferConvert(self.config)(buffer)
                     break
                 buffer+=part
@@ -950,9 +946,10 @@ class cc1101:
 
 if __name__ == "__main__":
     a=cc1101(1)
-    a.Init(3)
-    a.ButtonA()
+    a.Init(7)
+    #a.ButtonA()
     #a.Init(4)
-    #a.LevoloPreSend()
-    #a.LevoloB2()
-    #a.Receive()
+    #a.LivoloPreSend()
+    #a.LivoloB2()
+    a.Receive()
+    a.Close()
