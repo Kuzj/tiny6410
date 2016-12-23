@@ -830,7 +830,7 @@ class cc1101:
                 t=toint(buffer[16:28])/10.0
             temp=self.temperature(toint(buffer[0:4]),toint(buffer[4:12]),toint(buffer[12:13]),toint(buffer[13:14]),toint(buffer[14:16]),round(t,2),toint(buffer[28:36]))
             print(temp.head,temp.id,temp.battery,temp.tx,temp.channel,temp.t,temp.h,time.ctime(temp.time))
-            return temp
+            return str(temp.t)+':'+str(temp.h)
         else:
             return 0
 
@@ -947,9 +947,5 @@ class cc1101:
 if __name__ == "__main__":
     a=cc1101(1)
     a.Init(7)
-    #a.ButtonA()
-    #a.Init(4)
-    #a.LivoloPreSend()
-    #a.LivoloB2()
     a.Receive()
     a.Close()

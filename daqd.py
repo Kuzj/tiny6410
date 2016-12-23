@@ -21,11 +21,6 @@ SOCKFILE = '/var/run/daqd/daqd.sock'
 SOCKFILE_OUT = '/var/run/daqd/daqd_out.sock'
 ELECFILE = '/var/run/daqd/elec.sock'
 DBFILE = './MainSt.db'
-# Настройка электро-счетчика
-elec_gpio=131
-init_value=6701.5
-main_value=init_value
-signal_step=0.0003125
 sock_buffer=32
 # Configure logging
 FORMAT="%(asctime)-15s %(message)s"
@@ -35,19 +30,99 @@ logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
 #debug=False
 #debug=True
 
-def status():
-    try:
-        pf = file(PIDFILE,'r')
-        pid = int(pf.read().strip())
-        pf.close()
-    except IOError:
-        pid = None
-    except SystemExit:
-        pid = None
-    if pid:
-        return True
-    else:
+class counter():
+    def __init__(self,init_val,step,id):
+        self.init_value=init_val
+        self.value=init_val
+        self.step=step
+        self.id=id
+        self.vih=0
+        self.vid=0
+
+    def inc(self):
+        self.value+=self.step
+
+    def val_in_hour(self,t):
+        return round(3600/t*self.step,3)
+
+    def val_in_day(self,t):
+        return round(3600*24/t*self.step,3)
+
+    def period(self,t):
+        self.vih=self.val_in_hour(t)
+        self.vid=self.val_in_day(t)
+
+    def save(self):
+        if self.ischange():
+            try:
+                cur=conn.cursor()
+                cur.execute('update daqd_sensors set count_value='+str(self.value)+' where id=?',str(self.id))
+                conn.commit()
+                logging.debug('counter: save '+str(self.id)+' sensor counter value: '+str(self.value))
+            except Exception,e:
+                logging.error('counter: error update count_value: '+str(e))
+
+    def reset(self):
+        self.value=0
+        self.save()
+
+    def ischange(self):
+        if self.value <> self.init_value:
+            return True
+
+class sensor():
+    def __init__(self,id,interface_id,enabled,count):
+        try:
+            self.id=id
+            self.interface_id=interface_id
+            self.enabled=enabled
+            cur=conn.cursor()
+            if int(count):
+                cur.execute('select count_value, count_step from daqd_sensors where id=?',str(self.id))
+                value,step=cur.fetchone()
+                self.counter=counter(value,step,self.id)
+            if self.isgpio():
+                cur.execute('select t.gpio_number,t.direction,t.active,e.value from daqd_interface_gpio t, daqd_gpio_edge e where t.sensor_id=? and t.edge_id=e.id',str(self.id))
+                num,dir,act,edge=cur.fetchone() 
+                self.thread=gpio_com_thread(self.id,num,dir,act,edge,count)
+        except Exception, e:
+            logging.error('sensor init error: '+str(e))
+            
+    def enable(self):
+        if not self.enabled:
+            try:
+                cur.execute('update daqd_sensors set enabled=1 where id=?',str(self.id))
+                conn.commit()
+                self.enabled=1
+            except Exception, e:
+                logging.error('sensor enable error: '+str(e))
+
+    def disable(self):
+        if self.enabled:
+            try:
+                cur.execute('update daqd_sensors set enabled=0 where id=?',str(self.id))
+                conn.commit()
+                self.enabled=0
+            except Exception, e:
+                logging.error('sensor disable error: '+str(e))
+    
+    def start(self):
+        if self.enabled and hasattr(self,'thread'):
+            self.thread.start()
+        else:
+            logging.error('sensor '+str(self.id)+' don`t start')
+                
+    def stop(self):
+        if hasattr(self,'thread'):
+            self.thread.stop()
+        else:
+            logging.error('sensor '+str(self.id)+' don`t stop')
+    
+    def isgpio(self):
+        if int(self.interface_id)==2:
+            return True
         return False
+
 # Поток для очереди входящих(in) и исходящих(out) сообщений
 class queue_thread(threading.Thread):
     def __init__(self,direction):
@@ -101,16 +176,16 @@ def send2scada(value):
     try:
         # Так как датчик может передовать только информацию, без опозновательных сигналов:
         # Считать количество датчиков на одной настройке cc1101 
-        cur.execute('select count(*) from interface_daqd_cc1101 where config_num=?',str(mod1.config))
+        cur.execute('select count(*) from daqd_interface_cc1101 where config_num=?',str(mod1.config))
         count=cur.fetchone()[0]
         # Если настройка cc1101 используется только для одного датчика, то брать sensor_id по номеру настройки
         if count==1:
-            cur.execute('select s.id, s.action_id from sensors s, interface_daqd_cc1101 c where s.id=c.sensor_id and c.config_num=?',str(mod1.config))
+            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.config_num=?',str(mod1.config))
             sensor_id,action_id=cur.fetchone()
             send(sensor_id,value,action_id)
         # Если больше одного датчика используют одну настройку, то брать sensor_id по сообщению передоваемого датчиком 
         elif count>1:
-            cur.execute('select s.id, s.action_id from sensors s, interface_daqd_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(mod1.config))
+            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(mod1.config))
             sensor_id,action_id=cur.fetchone()
             send(sensor_id,value,action_id)
     except Exception,e:
@@ -247,31 +322,38 @@ class cc1101_com_thread(threading.Thread):
 
     def run(self):
         logging.critical('cc1101 communication: start')
-        if not mod1.GDO0State:
-            mod1.GDO0Open()
-        mod1.FlushRX()
-        mod1.Srx()
-        while self.running:
-            logging.debug('cc1101 communication: before poll')
-            events=mod1.epoll_obj.poll(1)
-            for fileno,event in events:
-                logging.debug('cc1101 communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(mod1.GDO0File.fileno()))
-                if fileno==mod1.GDO0File.fileno():
-                    data=mod1.ReadBuffer()
-                    logging.info('cc1101 communication: receive: '+data)
-                    daemon.queue_out.add(data)
+        try:
+            #mod1=cc1101(0)
+            #mod1.Init(7)
+            if not mod1.GDO0State:
+                mod1.GDO0Open()
+            mod1.FlushRX()
+            mod1.Srx()
+            while self.running:
+                logging.debug('cc1101 communication: before poll')
+                events=mod1.epoll_obj.poll(1)
+                for fileno,event in events:
+                    logging.debug('cc1101 communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(mod1.GDO0File.fileno()))
+                    if fileno==mod1.GDO0File.fileno():
+                        data=mod1.ReadBuffer()
+                        logging.info('cc1101 communication: receive: '+data)
+                        daemon.queue_out.add(data)
+                        mod1.FlushRX()
+                        mod1.Srx()
+                if mod1.Marcstate()!='RX':
+                    logging.error('cc1101 communication: flush with out read buffer')
                     mod1.FlushRX()
                     mod1.Srx()
-            if mod1.Marcstate()!='RX':
-                logging.error('cc1101 communication: flush with out read buffer')
-                mod1.FlushRX()
-                mod1.Srx()
+            mod1.Close()
+        except Exception,e:
+            logging.error('cc1101 communication: '+str(e))
         logging.critical('cc1101 communication: stop')
+       
 # Для каждого включенного датчика gpio
 # запускается свой поток
 class gpio_com_thread(threading.Thread):
 
-    def __init__(self,id,gpio,dir,act,edge):
+    def __init__(self,id,gpio,dir,act,edge,counter):
         threading.Thread.__init__(self)
         self.running=True
         self.id=id
@@ -279,46 +361,60 @@ class gpio_com_thread(threading.Thread):
         self.dir=dir
         self.act=act
         self.edge=edge
+        self.counter=counter
         fagpio.export(gpio)
         logging.critical('gpio communication: export '+str(gpio)+' gpio')
 
     def stop(self):
+        if self.counter and sensors[self.id].counter.ischange():
+            sensors[self.id].counter.save()
         self.running=False
 
     def run(self):
-        gpio=fagpio.gpio(self.gpio)
-        gpio.edge=self.edge
-        gpio.direction=self.dir
-        gpio.active=self.act
-        s_id=str(self.id)
-        s_gpio=str(self.gpio)
-        logging.critical('gpio communication: start sensor '+s_id+' on gpio '+s_gpio+' with edge '+ self.edge)
-        while self.running:
-            events=gpio.epoll_obj.poll(1)
-            logging.debug('gpio communication: sensor id ' + s_id + ': no event')
-            for fileno,event in events:
-                logging.debug('gpio communication: event file:'+str(fileno)+' event:'+str(event)+' file:'+str(gpio.fvalue.fileno()))
-                if fileno==gpio.fvalue.fileno():
-                    data=s_id+':'+str(gpio.value)
-                    logging.info('gpio communication: sensor id ' + s_id + ' gpio ' + s_gpio + ': ' + data)
-                    daemon.queue_out.add(data)
-        fagpio.unexport(self.gpio)
-        logging.critical('gpio communication: unexport '+str(self.gpio)+' gpio')
-        logging.critical('gpio communication: stop sensor '+s_id+' on gpio '+s_gpio+' with edge '+ self.edge)
-
-class electric_counter():
-    def __init__(self,v):
-        self.value=v
-        self.act_pow=0
-    def inc(self):
-        self.value+=signal_step
-    def sectokw(self,t):
-        return round(9/(8*t),3)
-    def period(self,t):
-        self.act_pow=self.sectokw(t)
-
-ec=electric_counter(main_value)
-
+        try:
+            gpio=fagpio.gpio(self.gpio)
+            gpio.edge=self.edge
+            gpio.direction=self.dir
+            gpio.active=self.act
+            s_id=str(self.id)
+            s_gpio=str(self.gpio)
+            logging.critical('gpio communication: start sensor:'+s_id+' gpio:'+s_gpio+' edge:'+ self.edge+' counter:'+ str(self.counter))
+            #Если включен счетчик на датчике
+            if self.counter:
+                t=time.time()
+                i=0
+                while self.running:
+                    events=gpio.epoll_obj.poll(1)
+                    logging.debug('gpio communication: sensor id ' + s_id + ': no event')
+                    for fileno,event in events:
+                        if fileno==gpio.fvalue.fileno():
+                            now=time.time()
+                            diff=round(now-t,2)
+                            t=now
+                            if i>1:
+                                sensors[self.id].counter.inc()
+                                sensors[self.id].counter.period(diff)
+                                logging.info('gpio communication: sensor '+ s_id + ' value:'+str(sensors[self.id].counter.value)+' '+str(diff)+' '+ str(sensors[self.id].counter.vih)+' '+ str(sensors[self.id].counter.vid))
+                            else:
+                                i+=1
+                                logging.info('gpio communication: sensor '+ s_id + ' counter init..')
+            else:
+                while self.running:
+                    events=gpio.epoll_obj.poll(1)
+                    logging.debug('gpio communication: sensor id ' + s_id + ': no event')
+                    for fileno,event in events:
+                        logging.debug('gpio communication: event file:'+str(fileno)+' event:'+str(event)+' file:'+str(gpio.fvalue.fileno()))
+                        if fileno==gpio.fvalue.fileno():
+                            #data=s_id+':'+str(gpio.value)
+                            logging.info('gpio communication: sensor ' + s_id + ' signal')
+                            daemon.queue_out.add(s_id)
+        except Exception,e:
+            logging.error('gpio communication: '+str(e))
+        finally:
+            fagpio.unexport(self.gpio)
+            logging.critical('gpio communication: unexport '+str(self.gpio)+' gpio')
+            logging.critical('gpio communication: stop sensor:'+s_id+' gpio:'+s_gpio+' edge:'+ self.edge+' counter:'+ str(self.counter))
+            
 class elec_control_thread(threading.Thread):
 
     def __init__(self):
@@ -362,54 +458,14 @@ class elec_control_thread(threading.Thread):
                     logging.info('elec control: receive: '+data)
                     t=time.ctime()
                     try:
-                        if data == '?':
-                            conn.send(str(ec.act_pow))
+                        if data[0] == '?':
+                            conn.send(str(sensors[data[1:]].counter.value))
                         else:
                             conn.send(t+'send `?`'+data)
                     except Exception,e:
                         logging.error('elec control: send error: '+str(e))
                         break
         logging.critical('elec control: stop')
-
-class elec_com_thread(threading.Thread):
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.running=True
-
-    def stop(self):
-        self.running=False
-
-    def run(self):
-        logging.critical('elec communication: start')
-        try:
-            fagpio.export(elec_gpio)
-            gpio=fagpio.gpio(elec_gpio)
-            gpio.edge='rising'
-            gpio.direction='in'
-            gpio.active=1
-            t=time.time()
-            i=0
-            while self.running:
-                logging.debug('elec communication: before poll')
-                events=gpio.epoll_obj.poll(1)
-                for fileno,event in events:
-                    if fileno==gpio.fvalue.fileno():
-                        now=time.time()
-                        diff=round(now-t,2)
-                        t=now
-                        if i>1:
-                            ec.inc()
-                            ec.period(diff)
-                            logging.info('elec communication: '+str(ec.value)+' '+str(diff)+' '+ str(ec.act_pow))
-                        else:
-                            i+=1
-                            logging.info('elec communication: init..')
-        except Exception,e:
-            logging.error('elec communication: '+str(e))
-        finally:
-            fagpio.unexport(elec_gpio)
-            logging.critical('elec communication: stop')
-
 
 class daqd(Daemon):
 
@@ -425,14 +481,9 @@ class daqd(Daemon):
             self.cc1101_com.start()
             self.elec_control=elec_control_thread()
             self.elec_control.start()
-            self.elec_com=elec_com_thread()
-            self.elec_com.start()
-            self.gpio_com_list=[]
-            for id,num,dir,act,edge in int_daqd_gpio:
-                gpio_com=gpio_com_thread(id,num,dir,act,edge)
-                self.gpio_com_list.append(gpio_com)
-                gpio_com.start()
-                time.sleep(0.5)
+            for s in sensors:
+                if sensors[s].isgpio():
+                    sensors[s].start()
         except Exception, e:
             logging.error('daqd exception: '+str(e))
 
@@ -443,9 +494,9 @@ def sigterm_handler(signal,frame):
     daemon.cc1101_control.stop()
     daemon.cc1101_com.stop()
     daemon.elec_control.stop()
-    daemon.elec_com.stop()
-    for gpio_com in daemon.gpio_com_list:
-        gpio_com.stop()
+    for s in sensors:
+        if sensors[s].isgpio():
+            sensors[s].stop()
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -461,11 +512,11 @@ if __name__ == "__main__":
             print("Starting...")
             logging.critical('Starting...')
             signal.signal(signal.SIGTERM, sigterm_handler)
-            int_daqd_gpio=[]
             cur=conn.cursor()
-            cur.execute('select t.sensor_id,t.gpio_number,t.direction,t.active,e.value from interface_daqd_gpio t, gpio_edge e, sensors s where t.sensor_id=s.id and t.edge_id=e.id and s.enable=1')
+            sensors = dict()
+            cur.execute('select id, interface_id, enabled, counter from daqd_sensors')
             for row in cur:
-                int_daqd_gpio.append(row)
+                sensors[row[0]]=sensor(row[0],row[1],row[2],row[3])
             mod1=cc1101(1)
             mod1.Init(7)
             mod0=cc1101(0)
@@ -486,8 +537,8 @@ if __name__ == "__main__":
                 os.remove(ELECFILE)
             except OSError:
                 pass
-            mod1=cc1101(1)
-            mod1.Close()
+            #mod1=cc1101(1)
+            #mod1.Close()
             mod0=cc1101(0)
             mod0.Close()
             daemon.stop()
