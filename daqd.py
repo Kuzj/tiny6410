@@ -27,8 +27,6 @@ FORMAT="%(asctime)-15s %(message)s"
 #CRITICAL=50 ERROR=40 WARNING=30 INFO=20 DEBUG=10 NOTSET=0
 #logging.basicConfig(filename=LOGFILE,level=logging.WARNING,format=FORMAT)
 logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
-#debug=False
-#debug=True
 
 class counter():
     def __init__(self,init_val,step,id):
@@ -123,6 +121,13 @@ class sensor():
             return True
         return False
 
+class rf_module(cc1101):
+    def __init__(self,id,config,rx):
+        cc1101.__init__(self,id)
+        self.Init(config)
+        self.rx=rx
+        self.thread=cc1101_com_thread(id)
+        
 # Поток для очереди входящих(in) и исходящих(out) сообщений
 class queue_thread(threading.Thread):
     def __init__(self,direction):
@@ -141,7 +146,6 @@ class queue_thread(threading.Thread):
         logging.critical('queue '+self.direction+': start')
         while self.running:
             try:
-                # block for 1 second only:
                 value = self.q.get(block=True, timeout=1)
                 logging.debug('queue "'+self.direction+'" size: '+str(self.q.qsize()))
                 if self.direction=='out':
@@ -157,7 +161,7 @@ class queue_thread(threading.Thread):
                 logging.warning('queue "'+self.direction+'": element in queue: '+q.get())
 
 def exec_control(value):
-    methodToCall=getattr(mod0,value)
+    methodToCall=getattr(rf_modules[1],value)
     methodToCall()
 
 def send2scada(value):
@@ -176,16 +180,16 @@ def send2scada(value):
     try:
         # Так как датчик может передовать только информацию, без опозновательных сигналов:
         # Считать количество датчиков на одной настройке cc1101 
-        cur.execute('select count(*) from daqd_interface_cc1101 where config_num=?',str(mod1.config))
+        cur.execute('select count(*) from daqd_interface_cc1101 where config_num=?',str(rf_modules[1].config))
         count=cur.fetchone()[0]
         # Если настройка cc1101 используется только для одного датчика, то брать sensor_id по номеру настройки
         if count==1:
-            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.config_num=?',str(mod1.config))
+            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.config_num=?',str(rf_modules[1].config))
             sensor_id,action_id=cur.fetchone()
             send(sensor_id,value,action_id)
         # Если больше одного датчика используют одну настройку, то брать sensor_id по сообщению передоваемого датчиком 
         elif count>1:
-            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(mod1.config))
+            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(rf_modules[1].config))
             sensor_id,action_id=cur.fetchone()
             send(sensor_id,value,action_id)
     except Exception,e:
@@ -308,46 +312,45 @@ class daqd_control_thread(threading.Thread):
         logging.critical('cc1101 control: stop')
 
 # Прослушивание частоты настроенной на модуле CC1101
-# mod1, все что получено(data)(определяется функциями в зависимости
+# все что получено(data)(определяется функциями в зависимости
 # от настройки CC1101) отсылается в очередь на передачу
-# в сокет SOCKFILE_OUT для передачи в Openscada.
+# в сокет для передачи в Openscada.
 class cc1101_com_thread(threading.Thread):
 
-    def __init__(self):
+    def __init__(self,id):
         threading.Thread.__init__(self)
         self.running=True
+        self.id=id
 
     def stop(self):
         self.running=False
 
     def run(self):
-        logging.critical('cc1101 communication: start')
+        logging.critical('cc1101('+str(self.id)+') communication: start')
         try:
-            #mod1=cc1101(0)
-            #mod1.Init(7)
-            if not mod1.GDO0State:
-                mod1.GDO0Open()
-            mod1.FlushRX()
-            mod1.Srx()
+            if not rf_modules[self.id].GDO0State:
+                rf_modules[self.id].GDO0Open()
+            rf_modules[self.id].FlushRX()
+            rf_modules[self.id].Srx()
             while self.running:
-                logging.debug('cc1101 communication: before poll')
-                events=mod1.epoll_obj.poll(1)
+                logging.debug('cc1101('+str(self.id)+') communication: before poll')
+                events=rf_modules[self.id].epoll_obj.poll(1)
                 for fileno,event in events:
-                    logging.debug('cc1101 communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(mod1.GDO0File.fileno()))
-                    if fileno==mod1.GDO0File.fileno():
-                        data=mod1.ReadBuffer()
-                        logging.info('cc1101 communication: receive: '+data)
+                    logging.debug('cc1101('+str(self.id)+') communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(rf_modules[self.id].GDO0File.fileno()))
+                    if fileno==rf_modules[self.id].GDO0File.fileno():
+                        data=rf_modules[self.id].ReadBuffer()
+                        logging.info('cc1101('+str(self.id)+') communication: receive: '+data)
                         daemon.queue_out.add(data)
-                        mod1.FlushRX()
-                        mod1.Srx()
-                if mod1.Marcstate()!='RX':
-                    logging.error('cc1101 communication: flush with out read buffer')
-                    mod1.FlushRX()
-                    mod1.Srx()
-            mod1.Close()
+                        rf_modules[self.id].FlushRX()
+                        rf_modules[self.id].Srx()
+                if rf_modules[self.id].Marcstate()!='RX':
+                    logging.error('cc1101('+str(self.id)+') communication: flush with out read buffer')
+                    rf_modules[self.id].FlushRX()
+                    rf_modules[self.id].Srx()
+            rf_modules[self.id].Close()
         except Exception,e:
-            logging.error('cc1101 communication: '+str(e))
-        logging.critical('cc1101 communication: stop')
+            logging.error('cc1101('+str(self.id)+') communication: '+str(e))
+        logging.critical('cc1101('+str(self.id)+') communication: stop')
        
 # Для каждого включенного датчика gpio
 # запускается свой поток
@@ -477,13 +480,14 @@ class daqd(Daemon):
             self.queue_in.start()
             self.cc1101_control=cc1101_control_thread()
             self.cc1101_control.start()
-            self.cc1101_com=cc1101_com_thread()
-            self.cc1101_com.start()
             self.elec_control=elec_control_thread()
             self.elec_control.start()
             for s in sensors:
                 if sensors[s].isgpio():
                     sensors[s].start()
+            for r in rf_modules:
+                if rf_modules[r].rx:
+                    rf_modules[r].thread.start()
         except Exception, e:
             logging.error('daqd exception: '+str(e))
 
@@ -492,11 +496,15 @@ def sigterm_handler(signal,frame):
     daemon.queue_out.stop()
     daemon.queue_in.stop()
     daemon.cc1101_control.stop()
-    daemon.cc1101_com.stop()
     daemon.elec_control.stop()
     for s in sensors:
         if sensors[s].isgpio():
             sensors[s].stop()
+    for r in rf_modules:
+        if rf_modules[r].rx:
+            rf_modules[r].thread.stop()
+            time.sleep(1)
+        rf_modules[r].Close()
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -517,10 +525,10 @@ if __name__ == "__main__":
             cur.execute('select id, interface_id, enabled, counter from daqd_sensors')
             for row in cur:
                 sensors[row[0]]=sensor(row[0],row[1],row[2],row[3])
-            mod1=cc1101(1)
-            mod1.Init(7)
-            mod0=cc1101(0)
-            mod0.Init(4)
+            rf_modules = dict()
+            cur.execute('select id,config,rx from daqd_config_cc1101')
+            for row in cur:
+                rf_modules[row[0]]=rf_module(row[0],row[1],row[2])
             daemon.start()
             # Основной поток должен остоваться, чтобы ловить сигнал SIGTERM
             while True:
@@ -537,10 +545,6 @@ if __name__ == "__main__":
                 os.remove(ELECFILE)
             except OSError:
                 pass
-            #mod1=cc1101(1)
-            #mod1.Close()
-            mod0=cc1101(0)
-            mod0.Close()
             daemon.stop()
         elif 'restart' == sys.argv[1]:
                 print("Restart...")
