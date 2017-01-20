@@ -54,13 +54,17 @@ class counter():
     def save(self):
         if self.ischange():
             try:
-                cur=conn.cursor()
+                cur=sql.cursor()
                 cur.execute('update daqd_sensors set count_value='+str(self.value)+' where id=?',str(self.id))
-                conn.commit()
+                sql.commit()
                 self.save_value=self.value
                 logging.debug('counter: save '+str(self.id)+' sensor counter value: '+str(self.value))
+                return 0
             except Exception,e:
                 logging.error('counter: error update count_value: '+str(e))
+                return 1
+        else:
+            return 4
 
     def reset(self):
         self.value=0
@@ -79,7 +83,7 @@ class sensor():
             self.id=id
             self.interface_id=interface_id
             self.enabled=enabled
-            cur=conn.cursor()
+            cur=sql.cursor()
             self.command_list=['enable','disable']
             if int(count):
                 cur.execute('select count_value, count_step from daqd_sensors where id=?',str(self.id))
@@ -103,39 +107,50 @@ class sensor():
         if not self.enabled:
             try:
                 cur.execute('update daqd_sensors set enabled=1 where id=?',str(self.id))
-                conn.commit()
+                sql.commit()
                 self.enabled=1
                 return 0
             except Exception, e:
+                return 1
                 logging.error('sensor '+str(self.id)+' enable error: '+str(e))
+        else:
+            return 2
 
     def disable(self):
         if self.enabled:
             try:
                 cur.execute('update daqd_sensors set enabled=0 where id=?',str(self.id))
-                conn.commit()
+                sql.commit()
                 self.enabled=0
                 return 0
             except Exception, e:
                 logging.error('sensor '+str(self.id)+' disable error: '+str(e))
-    
+                return 1
+        else:
+            return 2
+
     def start(self):
         if not self.starting:
             if self.enabled:
                 self.thread=gpio_com_thread(self.id,self.gpio['num'],self.gpio['dir'],self.gpio['act'],self.gpio['edge'],self.gpio['count'])
                 self.thread.start()
                 self.starting=True
+                return 0
             else:
                 logging.info('sensor '+str(self.id)+' disabled')
+                return 2
         else:
             logging.info('sensor '+str(self.id)+' thread already start')
+            return 3
 
     def stop(self):
         if self.starting:
             self.thread.stop()
             self.starting=False
+            return 0
         else:
             logging.info('sensor '+str(self.id)+' not starting')
+            return 3
 
     def isgpio(self):
         if int(self.interface_id)==2:
@@ -157,8 +172,9 @@ class queue_thread(threading.Thread):
         self.q = Queue.Queue()
         self.direction=direction
 
-    def add(self, data):
+    def add(self, data, conn=False):
         self.q.put(data)
+        self.conn=conn
 
     def stop(self):
         self.running = False
@@ -172,7 +188,7 @@ class queue_thread(threading.Thread):
                 if self.direction=='out':
                     send2scada(value)
                 elif self.direction=='in':
-                    exec_control(value)
+                    exec_control(value,self.conn)
             except Queue.Empty:
                 pass
         logging.critical('queue "'+self.direction+'": stop')
@@ -181,7 +197,7 @@ class queue_thread(threading.Thread):
             while not q.empty():
                 logging.warning('queue "'+self.direction+'": element in queue: '+q.get())
 
-def exec_control(value):
+def exec_control(value,conn):
     def valid(value):
         data=value.split(' ',1)
         if data.__len__()==2: 
@@ -190,9 +206,11 @@ def exec_control(value):
                 return data
             except ValueError:
                 logging.error('daqd control: command format error')
+                conn.send('daqd control: command format error')
                 return False
         else:
             logging.error('daqd control: command format error')
+            conn.send('daqd control: command format error')
             return False
     # 100 это сс1101(0). 101 это cc1101(1)
     try:
@@ -201,19 +219,26 @@ def exec_control(value):
             if data[0] in [100,101]:
                 if data[1] in cc1101.command_list:
                     command=getattr(rf_modules[data[0]%100],data[1])
-                    command()
-                    logging.info('daqd control: sensor '+str(data[0])+' command: '+data[1])
+                    answer=command()
+                    if conn:
+                        conn.send(str(answer))
+                    logging.info('daqd control: sensor '+str(data[0])+' command: "'+data[1]+'"')
                 else:
-                    logging.error('daqd control: sensor '+str(data[0])+' command '+data[1]+' not found')
+                    logging.error('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
+                    conn.send('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
             elif data[0] in sensors.keys():
                 if data[1] in sensors[data[0]].command_list:
                     command=getattr(sensors[data[0]],data[1])
-                    command()
-                    logging.info('daqd control: sensor '+str(data[0])+' command: '+data[1])
+                    answer=command()
+                    if conn:
+                        conn.send(str(answer))
+                    logging.info('daqd control: sensor '+str(data[0])+' command: "'+data[1]+'"')
                 else:
-                    logging.error('daqd control: sensor '+str(data[0])+' command '+data[1]+' not found')
+                    logging.error('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
+                    conn.send('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
             else:
                 logging.error('daqd control: sensor '+str(data[0])+' not found')
+                conn.send('daqd control: sensor '+str(data[0])+' not found')
     except Exception,e:
         logging.error('daqd control: '+str(e))
 
@@ -286,18 +311,18 @@ class daqd_control_thread(threading.Thread):
                 except socket.timeout,e:
                     continue
                 except Exception,e:
-                    logging.error(str(e))
+                    logging.error('daqd control: '+str(e))
                 else:
-                    logging.info('daqd control: receive: '+data)
-                    t=time.ctime()
-                    rez=''
-                    try:
-                        daemon.queue_in.add(data)
-                        conn.send(t+': "'+data+'" in queue')
-                        logging.info('daqd control: "'+data+'" in queue')
-                    except Exception,e:
-                        logging.error('daqd control: send error:'+str(e))
-                        break
+                    if data:
+                        logging.info('daqd control: receive: '+data)
+                        t=time.ctime()
+                        rez=''
+                        try:
+                            daemon.queue_in.add(data,conn)
+                            logging.info('daqd control: "'+data+'" in queue')
+                        except Exception,e:
+                            logging.error('daqd control: send error:'+str(e))
+                            break
         logging.critical('daqd control: stop')
 
 # Прослушивание частоты настроенной на модуле CC1101
@@ -444,7 +469,7 @@ def sigterm_handler(signal,frame):
 if __name__ == "__main__":
     daemon = daqd(PIDFILE)
     if isfile(DBFILE):
-        conn=sqlite3.connect(DBFILE,check_same_thread=False)
+        sql=sqlite3.connect(DBFILE,check_same_thread=False)
     else:
         print(DBFILE+' file is not exist')
         logging.error(DBFILE+' file is not exist')
@@ -454,7 +479,7 @@ if __name__ == "__main__":
             print("Starting...")
             logging.critical('Starting...')
             signal.signal(signal.SIGTERM, sigterm_handler)
-            cur=conn.cursor()
+            cur=sql.cursor()
             sensors = dict()
             cur.execute('select id, interface_id, enabled, counter from daqd_sensors')
             for row in cur:
@@ -470,7 +495,7 @@ if __name__ == "__main__":
         elif 'stop' == sys.argv[1]:
             print("Stop...")
             logging.critical('Stop...')
-            conn.close()
+            sql.close()
             try:
                 os.remove(SOCKFILE)
             except OSError:
