@@ -347,25 +347,28 @@ class cc1101_com_thread(threading.Thread):
             rf_modules[self.id].FlushRX()
             rf_modules[self.id].Srx()
             while self.running:
-                logging.debug('cc1101('+str(self.id)+') communication: before poll')
+                #logging.debug('cc1101('+str(self.id)+') communication: before poll')
                 events=rf_modules[self.id].epoll_obj.poll(1)
                 for fileno,event in events:
-                    logging.debug('cc1101('+str(self.id)+') communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(rf_modules[self.id].GDO0File.fileno()))
+                    #logging.debug('cc1101('+str(self.id)+') communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(rf_modules[self.id].GDO0File.fileno()))
                     if fileno==rf_modules[self.id].GDO0File.fileno():
                         data=rf_modules[self.id].ReadBuffer()
-                        logging.info('cc1101('+str(self.id)+') communication: receive: '+data)
-                        daemon.queue_out.add(data)
-                        rf_modules[self.id].FlushRX()
-                        rf_modules[self.id].Srx()
+                        if data:
+                            logging.info('cc1101('+str(self.id)+') communication: receive: '+data)
+                            daemon.queue_out.add(data)
+                            rf_modules[self.id].FlushRX()
+                            rf_modules[self.id].Srx()
+                        else:
+                            logging.info('cc1101('+str(self.id)+') communication: receive error')
                 if rf_modules[self.id].Marcstate()!='RX':
                     logging.error('cc1101('+str(self.id)+') communication: flush with out read buffer')
                     rf_modules[self.id].FlushRX()
                     rf_modules[self.id].Srx()
-            rf_modules[self.id].Close()
         except Exception,e:
             logging.error('cc1101('+str(self.id)+') communication: '+str(e))
+        rf_modules[self.id].Close()
         logging.critical('cc1101('+str(self.id)+') communication: stop')
-       
+
 # Для каждого включенного датчика gpio
 # запускается свой поток
 class gpio_com_thread(threading.Thread):

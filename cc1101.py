@@ -809,7 +809,11 @@ class cc1101:
 
     def TempDecode(self,b):
         def toint(bin_str):
-            return int(bin_str,2)
+            try:
+                rez=int(bin_str,2)
+            except:
+                return -1
+            return rez
         p=re.compile('1+')
         ps=re.compile('10{20,22}')
         p0=re.compile('10{4,6}')
@@ -822,10 +826,13 @@ class cc1101:
             sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
             # вернуть сообщение ктр чаще повторилось
             buffer=sorted_dpack[len(sorted_dpack)-1][0]
-            sign=int(buffer[16:17])
+            try:
+                sign=int(buffer[16:17])
+            except:
+                return 0
             #Если двоичный код температуры начинается с 1, то значение отрицательное(смотри "дополнительный код")
             if sign:
-                t=(~(int(buffer[16:28],2)^0xfff))/10.0
+                t=(~(toint(buffer[16:28])^0xfff))/10.0
             else:
                 t=toint(buffer[16:28])/10.0
             temp=self.temperature(toint(buffer[0:4]),toint(buffer[4:12]),toint(buffer[12:13]),toint(buffer[13:14]),toint(buffer[14:16]),round(t,2),toint(buffer[28:36]))
