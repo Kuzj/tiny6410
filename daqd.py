@@ -27,7 +27,7 @@ FORMAT="%(asctime)-15s %(message)s"
 #CRITICAL=50 ERROR=40 WARNING=30 INFO=20 DEBUG=10 NOTSET=0
 #logging.basicConfig(filename=LOGFILE,level=logging.ERROR,format=FORMAT)
 #logging.basicConfig(filename=LOGFILE,level=logging.WARNING,format=FORMAT)
-logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
+#logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
 
 class counter():
     def __init__(self,init_val,step,id):
@@ -42,10 +42,16 @@ class counter():
         self.value+=self.step
 
     def val_in_hour(self,t):
-        return round(3600/t*self.step,3)
+        try:
+            return round(3600/t*self.step,3)
+        except:
+            return 0
 
     def val_in_day(self,t):
-        return round(3600*24/t*self.step,3)
+        try:
+            return round(3600*24/t*self.step,3)
+        except:
+            return 0
 
     def period(self,t):
         self.vih=self.val_in_hour(t)
@@ -68,6 +74,14 @@ class counter():
 
     def reset(self):
         self.value=0
+        return 0
+
+    def update(self,value=0):
+        try:
+            value=float(value)
+        except:
+            return 1
+        self.value=value
         return 0
         
     def ischange(self):
@@ -92,7 +106,8 @@ class sensor():
                 self.save=self.counter.save
                 self.count=self.counter.join
                 self.reset=self.counter.reset
-                self.command_list.extend(['count','reset','save'])
+                self.update=self.counter.update
+                self.command_list.extend(['count','reset','save','update'])
             if self.isgpio():
                 cur.execute('select t.gpio_number,t.direction,t.active,e.value from daqd_interface_gpio t, daqd_gpio_edge e where t.sensor_id=? and t.edge_id=e.id',str(self.id))
                 self.gpio=dict()
@@ -160,9 +175,31 @@ class sensor():
 class rf_module(cc1101):
     def __init__(self,id,config,rx):
         cc1101.__init__(self,id)
-        self.Init(config)
+        self.id=id
         self.rx=rx
+        self.config=config
         self.thread=cc1101_com_thread(id)
+        self.starting=False
+
+    def start(self):
+        if not self.starting:
+            self.Init(self.config)
+            self.thread=cc1101_com_thread(self.id)
+            self.thread.start()
+            self.starting=True
+            return 0
+        else:
+            logging.info('cc1101('+str(self.id)+') thread already start')
+            return 3
+
+    def stop(self):
+        if self.starting:
+            self.thread.stop()
+            self.starting=False
+            return 0
+        else:
+            logging.info('cc1101('+str(self.id)+') not starting')
+            return 3
 
 # Поток для очереди входящих(in) и исходящих(out) сообщений
 class queue_thread(threading.Thread):
@@ -184,7 +221,7 @@ class queue_thread(threading.Thread):
         while self.running:
             try:
                 value = self.q.get(block=True, timeout=1)
-                logging.debug('queue "'+self.direction+'" size: '+str(self.q.qsize()))
+                #logging.debug('queue "'+self.direction+'" size: '+str(self.q.qsize()))
                 if self.direction=='out':
                     send2scada(value)
                 elif self.direction=='in':
@@ -199,12 +236,20 @@ class queue_thread(threading.Thread):
 
 def exec_control(value,conn):
     def valid(value):
-        data=value.split(' ',1)
-        if data.__len__()==2: 
+        data=value.split()
+        try:
+            data[0]=int(data[0])
+        except ValueError:
+            logging.error('daqd control: command format error')
+            conn.send('daqd control: command format error')
+            return False
+        if data.__len__() == 2: 
+            return data
+        elif data.__len__() == 3:
             try:
-                data[0]=int(data[0])
+                data[2]=float(data[2])
                 return data
-            except ValueError:
+            except:
                 logging.error('daqd control: command format error')
                 conn.send('daqd control: command format error')
                 return False
@@ -217,22 +262,25 @@ def exec_control(value,conn):
         data=valid(value)
         if data:
             if data[0] in [100,101]:
-                if data[1] in cc1101.command_list:
+                if (data[1] in cc1101.command_list) or (data[1] in ['stop','start']):
                     command=getattr(rf_modules[data[0]%100],data[1])
                     answer=command()
                     if conn:
                         conn.send(str(answer))
-                    logging.info('daqd control: sensor '+str(data[0])+' command: "'+data[1]+'"')
+                    logging.debug('daqd control: sensor '+str(data[0])+' command: "'+data[1]+'"')
                 else:
                     logging.error('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
                     conn.send('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
             elif data[0] in sensors.keys():
                 if data[1] in sensors[data[0]].command_list:
                     command=getattr(sensors[data[0]],data[1])
-                    answer=command()
+                    if data.__len__() == 2:
+                        answer=command()
+                    elif data.__len__() == 3:
+                        answer=command(data[2])
                     if conn:
                         conn.send(str(answer))
-                    logging.info('daqd control: sensor '+str(data[0])+' command: "'+data[1]+'"')
+                        logging.debug('daqd control: sensor '+str(data[0])+' command: "'+data[1]+'"')
                 else:
                     logging.error('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
                     conn.send('daqd control: sensor '+str(data[0])+' command "'+data[1]+'" not found')
@@ -252,7 +300,7 @@ def send2scada(value):
             sock.send(xml_str(sensor_id,value,action_id))
             sock.recv(sock_buffer)
             sock.close()
-            logging.info('send to OpenSCADA: '+str(sensor_id)+'|'+value+'|'+str(action_id))
+            logging.debug('send to OpenSCADA: '+str(sensor_id)+'|'+value+'|'+str(action_id))
         except Exception,e:
             logging.error('OpenSCADA socket error: '+str(e))
     try:
@@ -300,7 +348,7 @@ class daqd_control_thread(threading.Thread):
                 conn, addr=sock.accept()
                 conn.settimeout(1)
             except socket.timeout,e:
-                logging.debug('daqd control: socket timeout')
+                #logging.debug('daqd control: socket timeout')
                 continue
             except Exception,e:
                 logging.error('daqd control: socket error: '+str(e))
@@ -314,12 +362,12 @@ class daqd_control_thread(threading.Thread):
                     logging.error('daqd control: '+str(e))
                 else:
                     if data:
-                        logging.info('daqd control: receive: '+data)
+                        logging.debug('daqd control: receive: '+data)
                         t=time.ctime()
                         rez=''
                         try:
                             daemon.queue_in.add(data,conn)
-                            logging.info('daqd control: "'+data+'" in queue')
+                            logging.debug('daqd control: "'+data+'" in queue')
                         except Exception,e:
                             logging.error('daqd control: send error:'+str(e))
                             break
@@ -347,26 +395,26 @@ class cc1101_com_thread(threading.Thread):
             rf_modules[self.id].FlushRX()
             rf_modules[self.id].Srx()
             while self.running:
-                #logging.debug('cc1101('+str(self.id)+') communication: before poll')
+                logging.debug('cc1101('+str(self.id)+') communication: before poll')
                 events=rf_modules[self.id].epoll_obj.poll(1)
                 for fileno,event in events:
-                    #logging.debug('cc1101('+str(self.id)+') communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(rf_modules[self.id].GDO0File.fileno()))
+                    logging.debug('cc1101('+str(self.id)+') communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(rf_modules[self.id].GDO0File.fileno()))
                     if fileno==rf_modules[self.id].GDO0File.fileno():
                         data=rf_modules[self.id].ReadBuffer()
                         if data:
-                            logging.info('cc1101('+str(self.id)+') communication: receive: '+data)
+                            logging.debug('cc1101('+str(self.id)+') communication: receive: '+data)
                             daemon.queue_out.add(data)
                             rf_modules[self.id].FlushRX()
                             rf_modules[self.id].Srx()
                         else:
-                            logging.info('cc1101('+str(self.id)+') communication: receive error')
+                            logging.error('cc1101('+str(self.id)+') communication: receive error')
                 if rf_modules[self.id].Marcstate()!='RX':
                     logging.error('cc1101('+str(self.id)+') communication: flush with out read buffer')
                     rf_modules[self.id].FlushRX()
                     rf_modules[self.id].Srx()
         except Exception,e:
             logging.error('cc1101('+str(self.id)+') communication: '+str(e))
-        rf_modules[self.id].Close()
+        rf_modules[self.id].Reset()
         logging.critical('cc1101('+str(self.id)+') communication: stop')
 
 # Для каждого включенного датчика gpio
@@ -405,7 +453,7 @@ class gpio_com_thread(threading.Thread):
                 i=0
                 while self.running:
                     events=gpio.epoll_obj.poll(1)
-                    logging.debug('gpio communication: sensor id ' + s_id + ': no event')
+                    #logging.debug('gpio communication: sensor id ' + s_id + ': no event')
                     for fileno,event in events:
                         if fileno==gpio.fvalue.fileno():
                             now=time.time()
@@ -414,24 +462,25 @@ class gpio_com_thread(threading.Thread):
                             if i>1:
                                 sensors[self.id].counter.inc()
                                 sensors[self.id].counter.period(diff)
-                                logging.info('gpio communication: sensor '+ s_id + ' value:'+str(sensors[self.id].counter.value)+' '+str(diff)+' '+ str(sensors[self.id].counter.vih)+' '+ str(sensors[self.id].counter.vid))
+                                logging.debug('gpio communication: sensor '+ s_id + ' value:'+str(sensors[self.id].counter.value)+' '+str(diff)+' '+ str(sensors[self.id].counter.vih)+' '+ str(sensors[self.id].counter.vid))
                             else:
                                 i+=1
                                 logging.info('gpio communication: sensor '+ s_id + ' counter init..')
             else:
                 while self.running:
                     events=gpio.epoll_obj.poll(1)
-                    logging.debug('gpio communication: sensor id ' + s_id + ': no event')
+                    #logging.debug('gpio communication: sensor id ' + s_id + ': no event')
                     for fileno,event in events:
-                        logging.debug('gpio communication: event file:'+str(fileno)+' event:'+str(event)+' file:'+str(gpio.fvalue.fileno()))
+                        #logging.debug('gpio communication: event file:'+str(fileno)+' event:'+str(event)+' file:'+str(gpio.fvalue.fileno()))
                         if fileno==gpio.fvalue.fileno():
                             #data=s_id+':'+str(gpio.value)
-                            logging.info('gpio communication: sensor ' + s_id + ' signal')
+                            logging.debug('gpio communication: sensor ' + s_id + ' signal')
                             daemon.queue_out.add(s_id)
         except Exception,e:
             logging.error('gpio communication: '+str(e))
         finally:
             fagpio.unexport(self.gpio)
+            sensors[self.id].starting=False
             logging.critical('gpio communication: unexport '+str(self.gpio)+' gpio')
             logging.critical('gpio communication: stop sensor:'+s_id+' gpio:'+s_gpio+' edge:'+ self.edge+' counter:'+ str(self.counter))
 
@@ -450,7 +499,7 @@ class daqd(Daemon):
                     sensors[s].start()
             for r in rf_modules:
                 if rf_modules[r].rx:
-                    rf_modules[r].thread.start()
+                    rf_modules[r].start()
         except Exception, e:
             logging.error('daqd exception: '+str(e))
 
@@ -464,7 +513,7 @@ def sigterm_handler(signal,frame):
             sensors[s].stop()
     for r in rf_modules:
         if rf_modules[r].rx:
-            rf_modules[r].thread.stop()
+            rf_modules[r].stop()
             time.sleep(1)
         rf_modules[r].Close()
     sys.exit(0)
@@ -480,6 +529,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
             print("Starting...")
+            logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
             logging.critical('Starting...')
             signal.signal(signal.SIGTERM, sigterm_handler)
             cur=sql.cursor()
@@ -497,6 +547,7 @@ if __name__ == "__main__":
                 time.sleep(1)
         elif 'stop' == sys.argv[1]:
             print("Stop...")
+            logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
             logging.critical('Stop...')
             sql.close()
             try:
@@ -510,6 +561,7 @@ if __name__ == "__main__":
             daemon.stop()
         elif 'restart' == sys.argv[1]:
                 print("Restart...")
+                logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
                 daemon.restart()
                 logging.critical('Restart...')
         elif 'status' == sys.argv[1]:
@@ -529,6 +581,29 @@ if __name__ == "__main__":
             print("Unknown command")
             sys.exit(2)
             sys.exit(0)
-    else:
-        print("usage: %s start|stop|restart|status" % sys.argv[0])
+#    else:
+#        print("usage: %s start|stop|restart|status" % sys.argv[0])
+#        sys.exit(2)
+    if len(sys.argv) == 3:
+        if 'start'==sys.argv[1] and 'debug'==sys.argv[2]:
+            print("Starting...debug")
+            logging.basicConfig(filename=LOGFILE,level=logging.DEBUG,format=FORMAT)
+            logging.critical('Starting...')
+            signal.signal(signal.SIGTERM, sigterm_handler)
+            cur=sql.cursor()
+            sensors = dict()
+            cur.execute('select id, interface_id, enabled, counter from daqd_sensors')
+            for row in cur:
+                sensors[row[0]]=sensor(row[0],row[1],row[2],row[3])
+            rf_modules = dict()
+            cur.execute('select id,config,rx from daqd_config_cc1101')
+            for row in cur:
+                rf_modules[row[0]]=rf_module(row[0],row[1],row[2])
+            daemon.start()
+            # Основной поток должен остоваться, чтобы ловить сигнал SIGTERM
+            while True:
+                time.sleep(1)
+        else:
+            print("usage: %s start|start debug|stop|restart|status" % sys.argv[0])
         sys.exit(2)
+        
