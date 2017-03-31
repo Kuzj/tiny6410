@@ -14,7 +14,9 @@ class cc1101:
     scan_timeout=8 # for scan_datarate(), scan_freq()
     spi0_gdo0=153 # eint9 gpn9
     spi1_gdo0=155 # eint11 gpn11
-    packet_len=1500 # for Receive()
+#    packet_len=1500 # for Receive()
+    packet_len=1500
+    livolo_packet_len=1500
     command_list = ['LivoloA',
         'LivoloB',
         'LivoloC',
@@ -379,24 +381,27 @@ class cc1101:
         # 7
         # temperature sensor
         {
-        'IOCFG0':0x06,
+#        'IOCFG0':0x06,
+        'IOCFG0':0x0E,
         'PKTCTRL1':0x00,
-        'PKTCTRL0':0x02,    #fixed length
+        'PKTCTRL0':0x02,    #infinite length
         'PKTLEN':0xFF,
         'FSCTRL1':0x0C,
         'FREQ2':0x10,   # 433.92
         'FREQ1':0xB0,
         'FREQ0':0x71,
-        'MDMCFG4':0x26,    #BW 541 Data rate 2.250
-        'MDMCFG3':0x6B,
-        'MDMCFG2':0x32,
+        'MDMCFG4':0x76,    #RX filter BW 232 kHz
+        'MDMCFG3':0x4C,    #Data rate 2.058 kBaud, 263680 Hz, 1bit(period)=128*(1/263680), rate=1/period=2058
+#        'MDMCFG2':0x32,
+        'MDMCFG2':0x34,
         'DEVIATN':0x62,
         'MCSM0':0x18,
         'FOCCFG':0x1D,
         'BSCFG':0x1C,
-        'AGCCTRL2':0x04,
-        'AGCCTRL1':0x00,
-        'AGCCTRL0':0x92,
+#        'AGCCTRL2':0x04,
+        'AGCCTRL2':0xE3,    #empirical value
+        'AGCCTRL1':0x41,    #empirical value
+        'AGCCTRL0':0x92,    #empirical value
         'WORCTRL':0xFB,
         'FREND1':0xB6,
         'FREND0':0x11,
@@ -407,10 +412,9 @@ class cc1101:
         'FSCAL1':0x00,
         'FSCAL0':0x1F,
         'TEST0':0x09,
-        #'MDMCFG4':0x29,    #BW 541 Data rate 2.250
-        #'MDMCFG3':0x6A,
-        #'SYNC1':0x00,
-        #'SYNC0':0xFF,
+        'TEST2':0x81,
+        'TEST1':0x35,
+        'FIFOTHR':0x47,
         }
     ]
 
@@ -731,37 +735,37 @@ class cc1101:
     def LivoloA(self):
         self.CheckSettings(4)
         packet=self.livolo_button(4)
-        big_packet=self.IncPacket(packet,1000)
+        big_packet=self.IncPacket(packet,self.livolo_packet_len)
         return self.Send2(big_packet)
 
     def LivoloB(self):
         self.CheckSettings(4)
         packet=self.livolo_button(8)
-        big_packet=self.IncPacket(packet,1000)
+        big_packet=self.IncPacket(packet,self.livolo_packet_len)
         return self.Send2(big_packet)
 
     def LivoloC(self):
         self.CheckSettings(4)
         packet=self.livolo_button(28)
-        big_packet=self.IncPacket(packet,1000)
+        big_packet=self.IncPacket(packet,self.livolo_packet_len)
         return self.Send2(big_packet)
 
     def LivoloD(self):
         self.CheckSettings(4)
         packet=self.livolo_button(21)
-        big_packet=self.IncPacket(packet,1000)
+        big_packet=self.IncPacket(packet,self.livolo_packet_len)
         return self.Send2(big_packet)
 
     def LivoloE(self):
         self.CheckSettings(4)
-        packet=self.livolo_button(2)
-        big_packet=self.IncPacket(packet,1000)
+        packet=self.livolo_button(16)
+        big_packet=self.IncPacket(packet,self.livolo_packet_len)
         return self.Send2(big_packet)
 
     def LivoloH(self):
         self.CheckSettings(4)
-        packet=self.livolo_button(5)
-        big_packet=self.IncPacket(packet,1000)
+        packet=self.livolo_button(7)
+        big_packet=self.IncPacket(packet,self.livolo_packet_len)
         return self.Send2(big_packet)
 
     def LivoloButton(self,b):
@@ -818,12 +822,16 @@ class cc1101:
             except:
                 return -1
             return rez
-        p=re.compile('1+')
-        ps=re.compile('10{20,22}')
-        p0=re.compile('10{4,6}')
-        p1=re.compile('10{8,10}')
-        #print(b)
-        a=p0.sub('null',p1.sub('one',ps.sub('s',p.sub('1',self.HumanBin(b))))).replace('null','0').replace('one','1').split('s')
+#old, bad signal manipulate
+#        p=re.compile('1+')
+#        ps=re.compile('10{19}')
+#        p0=re.compile('10{4}')
+#        p1=re.compile('10{8}')
+#        a=p0.sub('null',p1.sub('one',ps.sub('s',p.sub('1',self.HumanBin(b))))).replace('null','0').replace('one','1').split('s')
+        Bit0='1'+'0'*4
+        Bit1='1'+'0'*8
+        BitS='1'+'0'*19
+        a=self.HumanBin(b).replace(BitS,'s').replace(Bit1,'1').replace(Bit0,'0').split('s')
         if a:
             dpack=dict([[x,a.count(x)] for x in set(a)])
             # сортировать по кол-ву повторов сообщения
@@ -863,6 +871,7 @@ class cc1101:
             b[i]=b[i][2:]
             b[i]=(8-len(b[i]))*'0'+b[i]
             a=a+b[i]
+        print a
         return a
 
     # Соответствие номеру конфигурации и функции обработки сообщения
@@ -905,30 +914,30 @@ class cc1101:
         while True:
             bytes=int(self.ReadStatus('RXBYTES')[1],16)
             #Читать кол-во байт, пока не повторится. стр. 56
-            while bytes!=int(self.ReadStatus('RXBYTES')[1],16):
+            while (bytes!=int(self.ReadStatus('RXBYTES')[1],16)):# or bytes<2):
                 bytes=int(self.ReadStatus('RXBYTES')[1],16)
             if sum_bytes+bytes>=self.packet_len:
                 kol=self.packet_len-len(buffer)
                 buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                #print(self.HumanBin(buffer))
+                self.GDO0Close()
                 return self.BufferConvert(self.config)(buffer)
                 break
             else:
             #bytes-1 потому что нельзя считывать последний байт 
             #до окончания всей передачи. стр 56
                 part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
-                #print(part)
+                print(part)
                 part_str=''
                 for i in part:
                     part_str+=i
-                if ('0xff0xff0xff' in part_str):
-                    #print('ff')
-                    #print(self.HumanBin(buffer))
+                if ('0xff0xff0xff' in part_str) or (sum_bytes>0 and not(part)):
+                    self.GDO0Close()
                     return self.BufferConvert(self.config)(buffer)
                     break
                 buffer+=part
                 sum_bytes+=bytes-1
-                time.sleep(0.015)
+                #time.sleep(0.015)
+                time.sleep(0.03)
 
     def Receive(self):
         if not self.GDO0State:
@@ -943,6 +952,7 @@ class cc1101:
                 #print(events,self.GDO0File.fileno())
                 for fileno,event in events:
                     if fileno==self.GDO0File.fileno():
+                        print(time.ctime())
                         self.RSSI=self.ReadStatus('RSSI')[1]
                         #print(self.RSSI)
                         print('RSSI: '+str(self.RssiDbm(int(self.RSSI,0)))+' db')
