@@ -306,16 +306,16 @@ def send2scada(value):
     try:
         # Так как датчик может передовать только информацию, без опозновательных сигналов:
         # Считать количество датчиков на одной настройке cc1101 
-        cur.execute('select count(*) from daqd_interface_cc1101 where config_num=?',str(rf_modules[1].config))
+        cur.execute('select count(*) from daqd_interface_cc1101 where config_num=?',str(rf_modules[0].config))
         count=cur.fetchone()[0]
         # Если настройка cc1101 используется только для одного датчика, то брать sensor_id по номеру настройки
         if count==1:
-            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.config_num=?',str(rf_modules[1].config))
+            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.config_num=?',str(rf_modules[0].config))
             sensor_id,action_id=cur.fetchone()
             send(sensor_id,value,action_id)
         # Если больше одного датчика используют одну настройку, то брать sensor_id по сообщению передоваемого датчиком 
         elif count>1:
-            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(rf_modules[1].config))
+            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(rf_modules[0].config))
             sensor_id,action_id=cur.fetchone()
             send(sensor_id,value,action_id)
     except Exception,e:
