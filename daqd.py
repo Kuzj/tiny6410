@@ -19,7 +19,6 @@ PIDFILE = '/var/run/daqd/daqd.pid'
 LOGFILE = '/var/log/daqd/daqd.log'
 SOCKFILE = '/var/run/daqd/daqd.sock'
 SOCKFILE_OUT = '/var/run/daqd/daqd_out.sock'
-ELECFILE = '/var/run/daqd/elec.sock'
 DBFILE = './daqd.db'
 sock_buffer=32
 # Configure logging
@@ -390,11 +389,11 @@ class cc1101_com_thread(threading.Thread):
     def run(self):
         logging.critical('cc1101('+str(self.id)+') communication: start')
         try:
-            if not rf_modules[self.id].GDO0State:
-                rf_modules[self.id].GDO0Open()
             rf_modules[self.id].FlushRX()
             rf_modules[self.id].Srx()
             while self.running:
+                if not rf_modules[self.id].GDO0State:
+                    rf_modules[self.id].GDO0Open()
                 logging.debug('cc1101('+str(self.id)+') communication: before poll')
                 events=rf_modules[self.id].epoll_obj.poll(1)
                 for fileno,event in events:
@@ -552,10 +551,6 @@ if __name__ == "__main__":
             sql.close()
             try:
                 os.remove(SOCKFILE)
-            except OSError:
-                pass
-            try:
-                os.remove(ELECFILE)
             except OSError:
                 pass
             daemon.stop()

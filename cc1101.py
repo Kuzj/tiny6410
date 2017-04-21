@@ -17,6 +17,7 @@ class cc1101:
 #    packet_len=1500 # for Receive()
     packet_len=1500
     livolo_packet_len=1500
+    read_threshold=15
     command_list = ['LivoloA',
         'LivoloB',
         'LivoloC',
@@ -124,29 +125,29 @@ class cc1101:
     }
 
     Marcstate_reg={
-        '0x0':'SLEEP',
-        '0x1':'IDLE',
-        '0x2':'XOFF',
-        '0x3':'VCOON_MC',
-        '0x4':'REGON_MC',
-        '0x5':'MANCAL',
-        '0x6':'VCOON',
-        '0x7':'REGON',
-        '0x8':'STARTCAL',
-        '0x9':'BWBOOST',
-        '0xa':'FS_LOCK',
-        '0xb':'IFADCON',
-        '0xc':'ENDCAL',
-        '0xd':'RX',
-        '0xe':'RX_END',
-        '0xf':'RX_RST',
-        '0x10':'TXRX_SWITCH',
-        '0x11':'RXFIFO_OVERFLOW',
-        '0x12':'FSTXON',
-        '0x13':'TX',
-        '0x14':'TX_END',
-        '0x15':'RXTX_SWITCH',
-        '0x16':'TXFIFO_UNDERFLOW'
+        0x0:'SLEEP',
+        0x1:'IDLE',
+        0x2:'XOFF',
+        0x3:'VCOON_MC',
+        0x4:'REGON_MC',
+        0x5:'MANCAL',
+        0x6:'VCOON',
+        0x7:'REGON',
+        0x8:'STARTCAL',
+        0x9:'BWBOOST',
+        0xa:'FS_LOCK',
+        0xb:'IFADCON',
+        0xc:'ENDCAL',
+        0xd:'RX',
+        0xe:'RX_END',
+        0xf:'RX_RST',
+        0x10:'TXRX_SWITCH',
+        0x11:'RXFIFO_OVERFLOW',
+        0x12:'FSTXON',
+        0x13:'TX',
+        0x14:'TX_END',
+        0x15:'RXTX_SWITCH',
+        0x16:'TXFIFO_UNDERFLOW'
     }
 
     WRITE_BURST=0x40
@@ -349,9 +350,10 @@ class cc1101:
         # 6
         # water sensor (tristatecode)
         {
-        'IOCFG0':0x06,
+#        'IOCFG0':0x06,
+        'IOCFG0':0x0E,
         'PKTCTRL1':0x00,
-        'PKTCTRL0':0x02,    #fixed length
+        'PKTCTRL0':0x02,    #infinite length
         'PKTLEN':0xFF,
         'FSCTRL1':0x0C,
         'FREQ2':0x10,   # 433.92
@@ -364,8 +366,11 @@ class cc1101:
         'MCSM0':0x18,
         'FOCCFG':0x1D,
         'BSCFG':0x1C,
-        'AGCCTRL2':0x04,
-        'AGCCTRL1':0x00,
+#        'AGCCTRL2':0x04,
+#        'AGCCTRL1':0x00,
+#        'AGCCTRL0':0x92,
+        'AGCCTRL2':0xE3,
+        'AGCCTRL1':0x41,
         'AGCCTRL0':0x92,
         'WORCTRL':0xFB,
         'FREND1':0xB6,
@@ -390,8 +395,10 @@ class cc1101:
         'FREQ2':0x10,   # 433.92
         'FREQ1':0xB0,
         'FREQ0':0x71,
-        'MDMCFG4':0x76,    #RX filter BW 232 kHz
-        'MDMCFG3':0x4C,    #Data rate 2.058 kBaud, 263680 Hz, 1bit(period)=128*(1/263680), rate=1/period=2058
+#        'MDMCFG4':0x76,    #RX filter BW 232 kHz
+#        'MDMCFG3':0x4C,    #Data rate 2.058 kBaud, 263680 Hz, 1bit(period)=128*(1/263680), rate=1/period=2058
+        'MDMCFG4':0x78,    #RX filter BW 232 kHz Data rate 8.207
+        'MDMCFG3':0x4B,
 #        'MDMCFG2':0x32,
         'MDMCFG2':0x34,
         'DEVIATN':0x62,
@@ -399,7 +406,8 @@ class cc1101:
         'FOCCFG':0x1D,
         'BSCFG':0x1C,
 #        'AGCCTRL2':0x04,
-        'AGCCTRL2':0xE3,    #empirical value
+#        'AGCCTRL2':0xE3,    #empirical value
+        'AGCCTRL2':0xE7,
         'AGCCTRL1':0x41,    #empirical value
         'AGCCTRL0':0x92,    #empirical value
         'WORCTRL':0xFB,
@@ -447,14 +455,14 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=list(map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_BURST,0])))
+                #r=list(map(hex,self.obj.xfer2([self.REGISTER[addr] | self.READ_BURST,0])))
+                return self.obj.xfer2([self.REGISTER[addr] | self.READ_BURST,0])
                 break
             except IOError:
                 self.Strobe('SNOP')
                 attempts+=1
         if attempts==3:
             raise IOError('ReadStatus input/output error')
-        return r
 
     def Strobe(self,addr):
         attempts=0
@@ -489,14 +497,14 @@ class cc1101:
         attempts=0
         while attempts < 3:
             try:
-                r=list(map(hex,self.obj.xfer2(buffer)))
+                return self.obj.xfer2(buffer)
+#                r=list(map(hex,self.obj.xfer2(buffer)))
                 break
             except IOError:
                 self.Strobe('SNOP')
                 attempts+=1
         if attempts==3:
             raise IOError('ReadBurstReg input/output error')
-        return r
 
     def WriteReg(self,addr,val):
         attempts=0
@@ -511,6 +519,21 @@ class cc1101:
             raise IOError('WriteReg input/output error')
         return r
 
+    def StatusByte(self,val):
+        status={
+        '000':'IDLE',
+        '001':'RX',
+        '010':'TX',
+        '011':'FSTXON',
+        '100':'CALIBRATE',
+        '101':'SETTLING',
+        '110':'RXFIFO_OVERFLOW',
+        '111':'TXFIFO_UNDERFLOW',
+        }
+        val_b=bin(val)[2:]
+        val_h='0'*(8-len(val_b))+val_b
+        return [status[val_h[1:4]],int(val_h[4:8],2)]
+        
     def WriteBurstReg(self,addr,buffer):
         buffer.insert(0,self.REGISTER[addr] | self.WRITE_BURST)
         attempts=0
@@ -583,12 +606,23 @@ class cc1101:
                 raise Exception("The frequency should be whithin the following ranges: 300-348, 387-464, 779-928")
         return self.WriteBurstReg('FREQ2',[freq2,freq1,freq0])
 
-    def DataRate(self,rate):
-        drate_e=math.trunc(math.log((((rate/1000.0)*math.pow(2,20))/26),2))
-        drate_m=math.trunc((((rate/1000.0)*math.pow(2,28))/(26*math.pow(2,drate_e)))-256)
-        m4=int(self.ReadReg('MDMCFG4')[1][:3]+str(hex(drate_e)[2:]),16)
-        m3=drate_m
-        return self.WriteBurstReg('MDMCFG4',[m4,m3])
+    #page 35
+    def DataRate(self,rate=0):
+        if rate>0:
+            drate_e=math.trunc(round(math.log((((rate/1000.0)*math.pow(2,20))/26),2)))
+            drate_m=math.trunc(round((((rate/1000.0)*math.pow(2,28))/(26*math.pow(2,drate_e)))-256))
+            if drate_m==256:
+                drate_e+=1
+                drate_m=0
+            m4=(int(self.ReadReg('MDMCFG4')[1],16)&0xF0)+drate_e
+            m3=drate_m
+            print hex(m4),hex(m3)
+            return self.WriteBurstReg('MDMCFG4',[m4,m3])
+        else:
+            drate_m=int(self.ReadReg('MDMCFG3')[1],16)
+            drate_e=int(self.ReadReg('MDMCFG4')[1],16)&0xF
+            rate=round((((256+drate_m)*math.pow(2,drate_e))*26000)/math.pow(2,28),5)
+            return rate
 
     def Init(self,num):
         self.Reset()
@@ -849,7 +883,11 @@ class cc1101:
                 t=toint(buffer[16:28])/10.0
             temp=self.temperature(toint(buffer[0:4]),toint(buffer[4:12]),toint(buffer[12:13]),toint(buffer[13:14]),toint(buffer[14:16]),round(t,2),toint(buffer[28:36]))
             print(temp.head,temp.id,temp.battery,temp.tx,temp.channel,temp.t,temp.h,time.ctime(temp.time))
-            return str(temp.t)+':'+str(temp.h)
+            #Датчик температуры один: с head=5 и id=214(55?). Фильтр.
+            if temp.head==5 and (temp.id==214 or temp.id==55):
+                return str(temp.t)+':'+str(temp.h)
+            else:
+                return 0
         else:
             return 0
 
@@ -860,15 +898,12 @@ class cc1101:
         6: TriStateCode,
         7: TempDecode,
         }
-
+    # buf = ['0xaa','0xff',...]
     def HumanBin(self,buf):
         a=''
         b=[]
-        for x in buf:
-            b.append(x)
-        for i in range(0,len(b)):
-            b[i]=bin(int(b[i],16))
-            b[i]=b[i][2:]
+        for i in range(0,len(buf)):
+            b.append(bin(buf[i])[2:])
             b[i]=(8-len(b[i]))*'0'+b[i]
             a=a+b[i]
         print a
@@ -910,34 +945,29 @@ class cc1101:
 
     def ReadBuffer(self):
         buffer=[]
-        sum_bytes=0
         while True:
-            bytes=int(self.ReadStatus('RXBYTES')[1],16)
-            #Читать кол-во байт, пока не повторится. стр. 56
-            while (bytes!=int(self.ReadStatus('RXBYTES')[1],16)):# or bytes<2):
-                bytes=int(self.ReadStatus('RXBYTES')[1],16)
-            if sum_bytes+bytes>=self.packet_len:
-                kol=self.packet_len-len(buffer)
-                buffer+=self.ReadBurstReg('RXFIFO',kol)[1:]
-                self.GDO0Close()
-                return self.BufferConvert(self.config)(buffer)
-                break
-            else:
-            #bytes-1 потому что нельзя считывать последний байт 
-            #до окончания всей передачи. стр 56
-                part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
-                print(part)
-                part_str=''
-                for i in part:
-                    part_str+=i
-                if ('0xff0xff0xff' in part_str) or (sum_bytes>0 and not(part)):
+#            Читать кол-во байт, пока не повторится. стр. 56
+#            while (bytes!=int(self.ReadStatus('RXBYTES')[1],16)) or (bytes<2):
+            bytes=0
+            less_count=0
+            while bytes<2:
+                packet=self.ReadStatus('RXBYTES')
+                status_byte,bytes=packet[0],packet[1]
+#                status,bytes_= self.StatusByte(status_byte)
+#                print status,bytes_,bytes
+#                print status_byte,bytes
+                less_count+=1
+#                if less_count>5 or status=='RXFIFO_OVERFLOW':
+                if less_count>self.read_threshold or status_byte>=96:
+                    print less_count
+                    #print buffer
+                    self.FlushRX()
                     self.GDO0Close()
                     return self.BufferConvert(self.config)(buffer)
-                    break
-                buffer+=part
-                sum_bytes+=bytes-1
-                #time.sleep(0.015)
-                time.sleep(0.03)
+            #bytes-1 потому что нельзя считывать последний байт 
+            #до окончания всей передачи. стр 56
+            part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
+            buffer+=part
 
     def Receive(self):
         if not self.GDO0State:
@@ -955,7 +985,8 @@ class cc1101:
                         print(time.ctime())
                         self.RSSI=self.ReadStatus('RSSI')[1]
                         #print(self.RSSI)
-                        print('RSSI: '+str(self.RssiDbm(int(self.RSSI,0)))+' db')
+                        #print('RSSI: '+str(self.RssiDbm(int(self.RSSI,0)))+' db')
+                        print('RSSI: '+str(self.RssiDbm(self.RSSI))+' db')
                         return self.ReadBuffer()
                         break
         try:
