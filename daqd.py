@@ -171,9 +171,9 @@ class sensor():
             return True
         return False
 
-class rf_module(cc1101):
+class rf_module(Cc1101):
     def __init__(self,id,config,rx):
-        cc1101.__init__(self,id)
+        Cc1101.__init__(self, id)
         self.id=id
         self.rx=rx
         self.config=config
@@ -182,7 +182,7 @@ class rf_module(cc1101):
 
     def start(self):
         if not self.starting:
-            self.Init(self.config)
+            self.init(self.config)
             self.thread=cc1101_com_thread(self.id)
             self.thread.start()
             self.starting=True
@@ -228,10 +228,10 @@ class queue_thread(threading.Thread):
             except Queue.Empty:
                 pass
         logging.critical('queue "'+self.direction+'": stop')
-        if not q.empty():
+        if not self.q.empty():
             logging.warning('queue "'+self.direction+'": elements left in the queue')
-            while not q.empty():
-                logging.warning('queue "'+self.direction+'": element in queue: '+q.get())
+            while not self.q.empty():
+                logging.warning('queue "'+self.direction+'": element in queue: '+self.q.get())
 
 def exec_control(value,conn):
     def valid(value):
@@ -261,7 +261,7 @@ def exec_control(value,conn):
         data=valid(value)
         if data:
             if data[0] in [100,101]:
-                if (data[1] in cc1101.command_list) or (data[1] in ['stop','start']):
+                if (data[1] in Cc1101.command_list) or (data[1] in ['stop', 'start']):
                     command=getattr(rf_modules[data[0]%100],data[1])
                     answer=command()
                     if conn:
@@ -290,8 +290,8 @@ def exec_control(value,conn):
         logging.error('daqd control: '+str(e))
 
 def send2scada(value):
-    def xml_str(sensor_id,data,action_id):
-        return '<?xml version="1.0" encoding="utf-8"?>\n<PACKAGE>\n<SENSOR sensor_id="'+str(sensor_id)+'" message="'+data+'" action_id="'+str(action_id)+'"/>\n</PACKAGE>'
+    def xml_str(sensor_id,value,action_id):
+        return '<?xml version="1.0" encoding="utf-8"?>\n<PACKAGE>\n<SENSOR sensor_id="'+str(sensor_id)+'" message="'+value+'" action_id="'+str(action_id)+'"/>\n</PACKAGE>'
     def send(sensor_id,value,action_id):
         try:
             sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -314,7 +314,7 @@ def send2scada(value):
             send(sensor_id,value,action_id)
         # Если больше одного датчика используют одну настройку, то брать sensor_id по сообщению передоваемого датчиком 
         elif count>1:
-            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',data,str(rf_modules[0].config))
+            cur.execute('select s.id, s.action_id from daqd_sensors s, daqd_interface_cc1101 c where s.id=c.sensor_id and c.message=? and c.config_num=?',value,str(rf_modules[0].config))
             sensor_id,action_id=cur.fetchone()
             send(sensor_id,value,action_id)
     except Exception,e:
@@ -389,31 +389,31 @@ class cc1101_com_thread(threading.Thread):
     def run(self):
         logging.critical('cc1101('+str(self.id)+') communication: start')
         try:
-            rf_modules[self.id].FlushRX()
-            rf_modules[self.id].Srx()
+            rf_modules[self.id].flush_rx()
+            rf_modules[self.id].srx()
             while self.running:
                 if not rf_modules[self.id].GDO0State:
-                    rf_modules[self.id].GDO0Open()
+                    rf_modules[self.id].gdo0_open()
                 logging.debug('cc1101('+str(self.id)+') communication: before poll')
                 events=rf_modules[self.id].epoll_obj.poll(1)
                 for fileno,event in events:
                     logging.debug('cc1101('+str(self.id)+') communication: event file:'+str(fileno)+' event:'+str(event)+' GDO0File:'+str(rf_modules[self.id].GDO0File.fileno()))
                     if fileno==rf_modules[self.id].GDO0File.fileno():
-                        data=rf_modules[self.id].ReadBuffer()
+                        data=rf_modules[self.id].read_buffer()
                         if data:
                             logging.debug('cc1101('+str(self.id)+') communication: receive: '+data)
                             daemon.queue_out.add(data)
-                            rf_modules[self.id].FlushRX()
-                            rf_modules[self.id].Srx()
+                            rf_modules[self.id].flush_rx()
+                            rf_modules[self.id].srx()
                         else:
                             logging.error('cc1101('+str(self.id)+') communication: receive error')
-                if rf_modules[self.id].Marcstate()!='RX':
+                if rf_modules[self.id].marcstate()!= 'RX':
                     logging.error('cc1101('+str(self.id)+') communication: flush with out read buffer')
-                    rf_modules[self.id].FlushRX()
-                    rf_modules[self.id].Srx()
+                    rf_modules[self.id].flush_rx()
+                    rf_modules[self.id].srx()
         except Exception,e:
             logging.error('cc1101('+str(self.id)+') communication: '+str(e))
-        rf_modules[self.id].Reset()
+        rf_modules[self.id].reset()
         logging.critical('cc1101('+str(self.id)+') communication: stop')
 
 # Для каждого включенного датчика gpio
@@ -514,7 +514,7 @@ def sigterm_handler(signal,frame):
         if rf_modules[r].rx:
             rf_modules[r].stop()
             time.sleep(1)
-        rf_modules[r].Close()
+        rf_modules[r].close()
     sys.exit(0)
 
 if __name__ == "__main__":
