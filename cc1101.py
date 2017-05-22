@@ -609,12 +609,12 @@ class cc1101:
     #page 35
     def DataRate(self,rate=0):
         if rate>0:
-            drate_e=math.trunc(round(math.log((((rate/1000.0)*math.pow(2,20))/26),2)))
-            drate_m=math.trunc(round((((rate/1000.0)*math.pow(2,28))/(26*math.pow(2,drate_e)))-256))
+            drate_e=math.trunc((math.log((((rate/1000.0)*math.pow(2,20))/26),2)))
+            drate_m=int(round((((rate/1000.0)*math.pow(2,28))/(26*math.pow(2,drate_e)))-256))
             if drate_m==256:
                 drate_e+=1
                 drate_m=0
-            m4=(int(self.ReadReg('MDMCFG4')[1],16)&0xF0)+drate_e
+            m4=(int(self.ReadReg('MDMCFG4')[1],16)&0xF0)+int(drate_e)
             m3=drate_m
             print hex(m4),hex(m3)
             return self.WriteBurstReg('MDMCFG4',[m4,m3])
@@ -818,12 +818,27 @@ class cc1101:
         else:
             return 0
 
+    def PackSign(self,b):
+        #p=b#self.HumanBin(b)
+        # Найти все последовательности 0
+        p0_r=re.compile('1(0+)1')
+        g=p0_r.findall(b)
+        # Составить словарь из последовательности 0 и их количества повторений
+        dpack=dict([[x,g.count(x)] for x in set(g) if x])
+        # сортировать по кол-ву повторов последовательности
+        sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
+        # вернуть длину меньшей последовательности из двух, ктр чаще повторялись
+        # По длине последователности и установленной datarate определить тип сообщения
+        return min(len(sorted_dpack[-1][0]),len(sorted_dpack[-2][0]))/self.DataRate()
+        #return len(sorted_dpack[len(sorted_dpack)-1][0])/self.DataRate()
+        # Длину максимальной последовательности 0, разделить на множитель(data rate установленная в настройках / data rate), что является длиной синхронизации(делитель пакетов)
+
     def TriStateCode(self,b):
         buttons={'10001000':'0','11101110':'1','10001110':'f'}
         a=self.HumanBin(b).replace('11111111','')
         a=a.split('10000000000000000000000000000000')[1:]
         if a:
-            dpack=dict([[x,a.count(x)] for x in set(a)])
+            dpack=dict([[x,a.count(x)] for x in set(a) if x])
             # сортировать по кол-ву повторов сообщения
             sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
             # вернуть сообщение ктр чаще повторилось
@@ -849,28 +864,46 @@ class cc1101:
             self.h=h
             self.time=time.time()
 
-    def TempDecode(self,b):
+#скорость передачи 2058 baud, (1 bit 485 микросекунд)
+#10000000000000000000   Sync byte
+#10000                  0 byte
+#100000000              1 byte
+    def TempDecode(self,bin_buffer):
         def toint(bin_str):
             try:
                 rez=int(bin_str,2)
             except:
                 return -1
             return rez
-#old, bad signal manipulate
-#        p=re.compile('1+')
-#        ps=re.compile('10{19}')
-#        p0=re.compile('10{4}')
-#        p1=re.compile('10{8}')
-#        a=p0.sub('null',p1.sub('one',ps.sub('s',p.sub('1',self.HumanBin(b))))).replace('null','0').replace('one','1').split('s')
-        Bit0='1'+'0'*4
-        Bit1='1'+'0'*8
-        BitS='1'+'0'*19
-        a=self.HumanBin(b).replace(BitS,'s').replace(Bit1,'1').replace(Bit0,'0').split('s')
+        temp_baudrate=2.058
+        #bin_buffer=self.HumanBin(b)
+        # count кол-во нулей в минимальной последовательности
+        count=int(round((self.DataRate()/temp_baudrate)*4))
+        #print count
+        if count==0:
+            return 0
+        # 0.2 - погрешность 20% :-)
+        accuracy=int(round(count*0.2))
+        if accuracy==0: accuracy=1
+        # Любое кол-во 1 с возможным одним 0 внутри
+        p=re.compile('1+0{0,1}1+')
+        # Бит синхронизации 
+        ps=re.compile('10{'+str(count*2+count)+',}')
+        # Бит 0
+        p0=re.compile('10{'+str(count-accuracy)+','+str(count+accuracy)+'}')
+        # Бит 1
+        p1=re.compile('10{'+str(count*2-accuracy)+','+str(count*2+accuracy)+'}')
+        a=p0.sub('null',p1.sub('one',ps.sub('s',p.sub('1',bin_buffer)))).replace('null','0').replace('one','1').split('s')
+#        Bit0='1'+'0'*4
+#        Bit1='1'+'0'*8
+#        BitS='1'+'0'*19
+#        a=self.HumanBin(b).replace(BitS,'s').replace(Bit1,'1').replace(Bit0,'0').split('s')
         if a:
-            dpack=dict([[x,a.count(x)] for x in set(a)])
+            dpack=dict([[x,a.count(x)] for x in set(a) if x])
             # сортировать по кол-ву повторов сообщения
             sorted_dpack=sorted(dpack.iteritems(), key=operator.itemgetter(1))
             # вернуть сообщение ктр чаще повторилось
+            print sorted_dpack
             buffer=sorted_dpack[len(sorted_dpack)-1][0]
             try:
                 sign=int(buffer[16:17])
@@ -883,22 +916,14 @@ class cc1101:
                 t=toint(buffer[16:28])/10.0
             temp=self.temperature(toint(buffer[0:4]),toint(buffer[4:12]),toint(buffer[12:13]),toint(buffer[13:14]),toint(buffer[14:16]),round(t,2),toint(buffer[28:36]))
             print(temp.head,temp.id,temp.battery,temp.tx,temp.channel,temp.t,temp.h,time.ctime(temp.time))
-            #Датчик температуры один: с head=5 и id=214(55?). Фильтр.
-            if temp.head==5 and (temp.id==214 or temp.id==55):
+            #Датчик температуры один: с head=5 и id=55(214?). Фильтр.
+            if temp.head==5 and (temp.id in [55,214]):
                 return str(temp.t)+':'+str(temp.h)
             else:
                 return 0
         else:
             return 0
 
-    # mapping settings and functions for receive
-    recv_func_dict={
-        4: LivoloButton,
-        5: TriStateCode,
-        6: TriStateCode,
-        7: TempDecode,
-        }
-    # buf = ['0xaa','0xff',...]
     def HumanBin(self,buf):
         a=''
         b=[]
@@ -909,15 +934,22 @@ class cc1101:
         print a
         return a
 
-    # Соответствие номеру конфигурации и функции обработки сообщения
-    def BufferConvert(self,x):
-        recv_func_dict={
-            4: self.LivoloButton,
-            5: self.TriStateCode,
-            6: self.TriStateCode,
-            7: self.TempDecode,
-            }
-        return recv_func_dict.get(x, self.TriStateCode)
+    def BufferConvert(self,b):
+        bin_buffer=self.HumanBin(b)
+        sign=self.PackSign(bin_buffer)
+        print sign
+        if 1:
+            return self.TempDecode(bin_buffer)
+        
+#Соответствие номеру конфигурации и функции обработки сообщения
+#    def BufferConvert(self,x):
+#        recv_func_dict={
+#            4: self.LivoloButton,
+#            5: self.TriStateCode,
+#            6: self.TriStateCode,
+#            7: self.TempDecode,
+#            }
+#        return recv_func_dict.get(x, self.TriStateCode)
 
     def RssiDbm(self,x):
         rssi_offset=74
@@ -957,13 +989,16 @@ class cc1101:
 #                print status,bytes_,bytes
 #                print status_byte,bytes
                 less_count+=1
-#                if less_count>5 or status=='RXFIFO_OVERFLOW':
+#               page 31
+#               if less_count>5 or status=='RXFIFO_OVERFLOW':
                 if less_count>self.read_threshold or status_byte>=96:
                     print less_count
                     #print buffer
                     self.FlushRX()
                     self.GDO0Close()
-                    return self.BufferConvert(self.config)(buffer)
+                    #return self.PackSign(self.HumanBin(buffer))
+                    #return self.BufferConvert(self.config)(buffer)
+                    return self.BufferConvert(buffer)
             #bytes-1 потому что нельзя считывать последний байт 
             #до окончания всей передачи. стр 56
             part=self.ReadBurstReg('RXFIFO',bytes-1)[1:]
@@ -995,6 +1030,10 @@ class cc1101:
             return rez
         except KeyboardInterrupt:
             self.GDO0Close()
+        except IOError:
+            print 'IOError'
+            self.GDO0Close()
+            self.Receive()
 
 if __name__ == "__main__":
     a=cc1101(1)
