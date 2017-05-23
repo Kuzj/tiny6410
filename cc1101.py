@@ -311,8 +311,8 @@ class Cc1101:
             'FREND0': 0x11,  # 0x17 PATABLE shaping
             'FSCAL3': 0xEA,
             'FSCAL2': 0x2A,
-            'SYNC1': 0xFA,  # a6? ---- EA при 6.4468
-            'SYNC0': 0xAA,  # 66? ---- AA при 6.4468
+            'SYNC1': 0xFA,  # a6? --- EA при 6.4468
+            'SYNC0': 0xAA,  # 66? --- AA при 6.4468
             'FSCAL1': 0x00,
             'FSCAL0': 0x1F,
             'TEST0': 0x09
