@@ -64,7 +64,7 @@ class Counter:
                             UPDATE daqd_sensors 
                             SET count_value=? 
                             WHERE id=?
-                            """, (str(self.value),str(self.id)))
+                            """, (str(self.value), str(self.id)))
                 sql.commit()
                 self.save_value = self.value
                 logging.debug('counter: save ' + str(self.id) + ' sensor counter value: ' + str(self.value))

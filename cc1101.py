@@ -808,132 +808,128 @@ class Cc1101:
         big_packet = self.inc_packet(packet, self.livolo_packet_len)
         return self.send2(big_packet)
 
-    #    def LivoloButton(self, b):
-    #        buttons = {'10100101': 'LivoloA', '10010101': 'LivoloB', '01100101': 'LivoloC', '01011010': 'LivoloD'}
-    #        a = self.HumanBin(b).replace('11111111', '')  # убрать шумы если куча FF, мешает определению клавиши
-    #        a = a.split('111')[1:]
-    #        if a:
-    #            dpack = dict([[x, a.count(x)] for x in set(a)])
-    #            # сортировать по кол-ву повторов сообщения
-    #            sorted_dpack = sorted(dpack.iteritems(), key=operator.itemgetter(1))
-    #            # вернуть сообщение ктр чаще повторилось [35:43] - нажатая кнопка
-    #            but = sorted_dpack[len(sorted_dpack) - 1][0][35:43]
-    #            if buttons.setdefault(but) is not None:
-    #                but = buttons.setdefault(but)
-    #            return but
-    #        else:
-    #            return 0
-
-    def pack_sign(self, b):
-        # p=b#self.HumanBin(b)
-        # Найти все последовательности 0
-        p0_r = re.compile('1(0+)1')
-        g = p0_r.findall(b)
-        # Составить словарь из последовательности 0 и их количества повторений
-        dpack = dict([[x, g.count(x)] for x in set(g) if x])
+    @staticmethod
+    def packet_code(b):
+        # Найти все последовательности 0 и 1
+        p0_r = re.compile('(0+)1')
+        p1_r = re.compile('(1+)0')
+        g0 = p0_r.findall(b)
+        g1 = p1_r.findall(b)
+        g = g0 + g1
+        # Найти словарь, для декодирования пакета
+        # Составить список из последовательностей 0 и 1 и их количества повторений
+        pack = [[x, g.count(x)] for x in set(g) if x]
         # сортировать по кол-ву повторов последовательности
-        sorted_dpack = sorted(dpack.iteritems(), key=operator.itemgetter(1))
-        # вернуть длину меньшей последовательности из двух, ктр чаще повторялись
-        # По длине последователности и установленной datarate определить тип сообщения
-        return min(len(sorted_dpack[-1][0]), len(sorted_dpack[-2][0])) / self.datarate()
-        # return len(sorted_dpack[len(sorted_dpack)-1][0])/self.DataRate()
-        # Длину максимальной последов-ти 0, разделить на множитель(datarate установленная в настройках / data rate),
-        # что является длиной синхронизации(делитель пакетов)
-
-    def tri_state_code(self, b):
-        buttons = {'10001000': '0', '11101110': '1', '10001110': 'f'}
-        pack = self.human_bin(b).replace('11111111', '').split('10000000000000000000000000000000')[1:]
-        if pack:
-            dpack = dict([[x, pack.count(x)] for x in set(pack) if x])
-            # сортировать по кол-ву повторов сообщения
-            sorted_dpack = sorted(dpack.iteritems(), key=operator.itemgetter(1))
-            # вернуть сообщение ктр чаще повторилось
-            buf = sorted_dpack[len(sorted_dpack) - 1][0]
-            word = ''
-            len_buf = len(buf)
-            if len_buf % 8 == 0:
-                for i in range(0, len_buf / 8):
-                    but = buf[i * 8:i * 8 + 8]
-                    word = word + buttons.setdefault(but, '?')
-            return word
+        sorted_pack = sorted(pack, key=operator.itemgetter(1))
+        # print sorted_pack
+        # Значения отличающиеся на один символ принимать за одну последовательность
+        for j in range(0, len(sorted_pack)):
+            for i in range(j, len(sorted_pack)):
+                if (sorted_pack[i][0][0] == sorted_pack[j][0][0]) and (
+                            int(math.fabs(len(sorted_pack[i][0]) - len(sorted_pack[j][0]))) in (1,)):
+                    sorted_pack[i][1] += sorted_pack[j][1]
+                    break
+        # еще раз сортировать на случай изменения порядка
+        sorted_pack = sorted(sorted_pack, key=operator.itemgetter(1))
+        # print sorted_pack
+        decode_dict = {}
+        m_g0 = max(g0)
+        m_g1 = max(g1)
+        decode_dict['sync'] = m_g0 if len(m_g0) > len(m_g1) else m_g1
+        # Из 4 чаще повторяющиехся послед. отобрать длинную 0(l0), короткую 0(s0), длинную 1(l1), короткую 1(s1) .
+        for i in range(-4, 0):
+            for j in range(i + 1, 0):
+                if sorted_pack[i][0][0] == '0' and sorted_pack[j][0][0] == '0':
+                    decode_dict['s0'] = min(sorted_pack[i][0], sorted_pack[j][0])
+                    decode_dict['l0'] = max(sorted_pack[i][0], sorted_pack[j][0])
+                if sorted_pack[i][0][0] == '1' and sorted_pack[j][0][0] == '1':
+                    decode_dict['s1'] = min(sorted_pack[i][0], sorted_pack[j][0])
+                    decode_dict['l1'] = max(sorted_pack[i][0], sorted_pack[j][0])
+        # print decode_dict
+        # Устанавливаем точность, что бы захватить сигналы ктр. длиннее или короче тех, ктр. чаще повторяются
+        diff0 = len(decode_dict['l0']) - len(decode_dict['s0'])
+        diff1 = len(decode_dict['l1']) - len(decode_dict['s1'])
+        accuracy0 = diff0 / 2 - 1 if diff0 > 1 else 0
+        accuracy1 = diff1 / 2 - 1 if diff1 > 1 else 0
+        accuracy_sync = (len(decode_dict['sync']) - len(decode_dict['l0'])
+                         ) / 2 - 1 if decode_dict['sync'][0] == '0' else (len(decode_dict['sync']
+                                                                              ) - len(decode_dict['l1'])) / 2 - 1
+        accuracy_sync = 0 if accuracy_sync < 0 else accuracy_sync
+        rs = re.compile(str(int(not int(decode_dict['sync'][0]))) + '+' + decode_dict['sync'][accuracy_sync:] + '[' +
+                        decode_dict['sync'][0] + ']{0,' + str(accuracy_sync) + '}')
+        packet = {}
+        # Если в кодировании учавствует 3 вида сигнала, то 3 и 4 последоват. по кол-ву повторений
+        # будут отличаться больше, чем в 2 раза (temp)
+        if sorted_pack[-3][1] / float(sorted_pack[-4][1]) > 2:
+            r0 = re.compile(
+                decode_dict['s1'][0] + '+' + decode_dict['s0'][accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}')
+            r1 = re.compile(
+                decode_dict['s1'][0] + '+' + decode_dict['l0'][accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}')
+            packet['type'] = 'tmp'
+        # Иначе в кодировании учавствует 4 вида сигнала
         else:
-            return 0
+            # Если 4 коротких сигнала, начиная с 0 идут подряд, то s0s1=0, s1s0=0, l0=1, l1=1 (livolo)
+            if decode_dict['s0'] + decode_dict['s1'] + decode_dict['s0'] + decode_dict['s1'] in b:
+                # or (decode_dict['s0']+decode_dict['s1']+decode_dict['l0']+decode_dict['l1'] in b):
+                r0 = re.compile(decode_dict['s1'][
+                                accuracy1:] + '[1]{0,' + str(accuracy1 * 2) + '}' + decode_dict['s0'][
+                                accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}|' + decode_dict['s0'][
+                                accuracy0:] + '[0]{0,' + str(accuracy1 * 2) + '}' + decode_dict['s1'][
+                                accuracy1:] + '[1]{0,' + str(accuracy0 * 2) + '}')
+                r1 = re.compile(decode_dict['l1'][
+                                accuracy1:] + '[1]{0,' + str(accuracy1 * 2) + '}|' + decode_dict['l0'][
+                                accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}|' + decode_dict['l0'][
+                                accuracy0:] + '[0]{0,' + str(accuracy1 * 2) + '}' + decode_dict['l1'][
+                                accuracy1:] + '[1]{0,' + str(accuracy0 * 2) + '}')
+                rs = re.compile(decode_dict['sync'][accuracy_sync:] + '[' + decode_dict['sync'][0] + ']{0,' + str(
+                    accuracy_sync) + '}')
+                packet['type'] = 'liv'
+            else:
+                # предварительно считать 0 это s1l0(11100000000), 1 это l1s0(00000000111) (car,3state)
+                r0 = re.compile(decode_dict['s1'][
+                                accuracy1:] + '[1]{0,' + str(accuracy1 * 2) + '}' + decode_dict['l0'][
+                                accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}')
+                r1 = re.compile(decode_dict['l1'][
+                                accuracy1:] + '[1]{0,' + str(accuracy1 * 2) + '}' + decode_dict['s0'][
+                                accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}')
+                packet['type'] = '4st'
+        rg = re.compile('[oo|ll|ol|lo]+')
+        group = rg.findall(r0.sub('o', r1.sub('l', rs.sub('s', b))))
+        # найти чаще всего повторяющиеся
+        code_message = sorted([[x, group.count(x)] for x in set(group) if x], key=operator.itemgetter(1))
+        print code_message
+        packet['code'] = code_message[-1][0].replace('o', '0').replace('l', '1')
+        # print message
+        return packet
 
-    class Temperature:
-        def __init__(self, head=0, id_=0, battery=0, tx=0, channel=0, t=0, h=0):
-            self.head = head
-            self.id = id_
-            self.battery = battery
-            self.tx = tx
-            self.channel = channel
-            self.t = t
-            self.h = h
-            self.time = time.time()
+    @staticmethod
+    def decode(b):
+        packet = Cc1101.packet_code(Cc1101.human_bin(b))
 
-            # скорость передачи 2058 baud, (1 bit 485 микросекунд)
-            # 10000000000000000000   Sync byte
-            # 10000                  0 byte
-            # 100000000              1 byte
+        def toint(s):
+            return str(int(s, 2))
 
-    def temp_decode(self, bin_buffer):
-        def toint(bin_str):
-            try:
-                rez = int(bin_str, 2)
-            except ValueError:
-                return -1
-            return rez
-
-        temp_baudrate = 2.058
-        # bin_buffer=self.HumanBin(b)
-        # count кол-во нулей в минимальной последовательности
-        count = int(round((self.datarate() / temp_baudrate) * 4))
-        # print count
-        if count == 0:
-            return 0
-        # 0.2 - погрешность 20% :-)
-        accuracy = int(round(count * 0.2))
-        if accuracy == 0:
-            accuracy = 1
-        # Любое кол-во 1 с возможным одним 0 внутри
-        p = re.compile('1+0?1+')
-        # Бит синхронизации 
-        ps = re.compile('10{' + str(count * 2 + count) + ',}')
-        # Бит 0
-        p0 = re.compile('10{' + str(count - accuracy) + ',' + str(count + accuracy) + '}')
-        # Бит 1
-        p1 = re.compile('10{' + str(count * 2 - accuracy) + ',' + str(count * 2 + accuracy) + '}')
-        pack = p0.sub('null', p1.sub('one', ps.sub('s', p.sub('1', bin_buffer))))
-        pack = pack.replace('null', '0').replace('one', '1').split('s')
-        #        Bit0='1'+'0'*4
-        #        Bit1='1'+'0'*8
-        #        BitS='1'+'0'*19
-        #        a=self.HumanBin(b).replace(BitS,'s').replace(Bit1,'1').replace(Bit0,'0').split('s')
-        if pack:
-            dpack = dict([[x, pack.count(x)] for x in set(pack) if x])
-            # сортировать по кол-ву повторов сообщения
-            sorted_dpack = sorted(dpack.iteritems(), key=operator.itemgetter(1))
-            # вернуть сообщение ктр чаще повторилось
-            print sorted_dpack
-            buf = sorted_dpack[len(sorted_dpack) - 1][0]
-            try:
-                sign = int(buf[16:17])
-            except ValueError:
-                return 0
+        if packet['type'] == '4st':
+            packet['message'] = ''
+            dict = {'00': '0', '11': '1', '01': 'f', '10': 'g'}
+            # Разделить весь код на список из двух символов и подставить в соответствие словарю
+            for c in [packet['code'][x:x + 2] for x in range(0, len(packet['code']), 2)]:
+                packet['message'] += dict[c]
+        elif packet['type'] == 'liv':
+            packet['message'] = int(packet['code'][17:22], 2)
+        elif packet['type'] == 'tmp':
+            sign = int(packet['code'][16:17])
             # Если двоичный код температуры начинается с 1, то значение отрицательное(смотри "дополнительный код")
             if sign:
-                t = (~(toint(buf[16:28]) ^ 0xfff)) / 10.0
+                t = (~(int(packet['code'][16:28], 2) ^ 0xfff)) / 10.0
             else:
-                t = toint(buf[16:28]) / 10.0
-            temp = self.Temperature(toint(buf[0:4]), toint(buf[4:12]), toint(buf[12:13]), toint(buf[13:14]),
-                                    toint(buf[14:16]), round(t, 1), toint(buf[28:36]))
-            print(temp.head, temp.id, temp.battery, temp.tx, temp.channel, temp.t, temp.h, time.ctime(temp.time))
-            # Датчик температуры один: с head=5 и id=55(214?). Фильтр.
-            if temp.head == 5 and (temp.id in [55, 214]):
-                return str(temp.t) + ':' + str(temp.h)
-            else:
-                return 0
-        else:
-            return 0
+                t = int(packet['code'][16:28], 2) / 10.0
+            packet['message'] = toint(packet['code'][0:4]) + ':' + toint(packet['code'][4:12]) + ':' + toint(
+                packet['code'][12:13]) + ':' + toint(packet['code'][13:14]) + ':' + toint(
+                packet['code'][14:16]) + ':' + str(round(t, 1)) + ':' + toint(packet['code'][28:36])
+        print packet['code']
+        print packet['message']
+        return packet
 
     @staticmethod
     def human_bin(buf):
@@ -945,23 +941,6 @@ class Cc1101:
             r = r + l[i]
         print r
         return r
-
-    def buffer_convert(self, b):
-        bin_buffer = self.human_bin(b)
-        sign = self.pack_sign(bin_buffer)
-        print sign
-        if 1:
-            return self.temp_decode(bin_buffer)
-
-            # Соответствие номеру конфигурации и функции обработки сообщения
-            #    def BufferConvert(self,x):
-            #        recv_func_dict={
-            #            4: self.LivoloButton,
-            #            5: self.TriStateCode,
-            #            6: self.TriStateCode,
-            #            7: self.TempDecode,
-            #            }
-            #        return recv_func_dict.get(x, self.TriStateCode)
 
     @staticmethod
     def rssi_dbm(x):
@@ -1005,13 +984,12 @@ class Cc1101:
                 #               page 31
                 #               if less_count>5 or status=='RXFIFO_OVERFLOW':
                 if less_count > self.read_threshold or status_byte >= 96:
-                    print less_count
                     # print buffer
                     self.flush_rx()
                     self.gdo0_close()
                     # return self.PackSign(self.HumanBin(buffer))
                     # return self.BufferConvert(self.config)(buffer)
-                    return self.buffer_convert(buf)
+                    return self.decode(buf)
             # bytes-1 потому что нельзя считывать последний байт
             # до окончания всей передачи. стр 56
             part = self.read_burst_reg('RXFIFO', bytes_ - 1)[1:]
