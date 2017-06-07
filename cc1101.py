@@ -831,32 +831,26 @@ class Cc1101:
                     break
         # еще раз сортировать на случай изменения порядка
         sorted_pack = sorted(sorted_pack, key=operator.itemgetter(1))
-        # print sorted_pack
+        print sorted_pack
         decode_dict = {}
         m_g0 = max(g0)
         m_g1 = max(g1)
-        decode_dict['sync'] = m_g0 if len(m_g0) > len(m_g1) else m_g1
+        sync_sign = m_g0[0] if len(m_g0) > len(m_g1) else m_g1[0]
         # Из 4 чаще повторяющиехся послед. отобрать длинную 0(l0), короткую 0(s0), длинную 1(l1), короткую 1(s1) .
-        for i in range(-4, 0):
-            for j in range(i + 1, 0):
-                if sorted_pack[i][0][0] == '0' and sorted_pack[j][0][0] == '0':
-                    decode_dict['s0'] = min(sorted_pack[i][0], sorted_pack[j][0])
-                    decode_dict['l0'] = max(sorted_pack[i][0], sorted_pack[j][0])
-                if sorted_pack[i][0][0] == '1' and sorted_pack[j][0][0] == '1':
-                    decode_dict['s1'] = min(sorted_pack[i][0], sorted_pack[j][0])
-                    decode_dict['l1'] = max(sorted_pack[i][0], sorted_pack[j][0])
+        decode_dict['s0'] = min([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '0'])
+        decode_dict['l0'] = max([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '0'])
+        decode_dict['s1'] = min([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '1'])
+        decode_dict['l1'] = max([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '1'])
         # print decode_dict
         # Устанавливаем точность, что бы захватить сигналы ктр. длиннее или короче тех, ктр. чаще повторяются
         diff0 = len(decode_dict['l0']) - len(decode_dict['s0'])
         diff1 = len(decode_dict['l1']) - len(decode_dict['s1'])
         accuracy0 = diff0 / 2 - 1 if diff0 > 1 else 0
         accuracy1 = diff1 / 2 - 1 if diff1 > 1 else 0
-        accuracy_sync = (len(decode_dict['sync']) - len(decode_dict['l0'])
-                         ) / 2 - 1 if decode_dict['sync'][0] == '0' else (len(decode_dict['sync']
-                                                                              ) - len(decode_dict['l1'])) / 2 - 1
-        accuracy_sync = 0 if accuracy_sync < 0 else accuracy_sync
-        rs = re.compile(str(int(not int(decode_dict['sync'][0]))) + '+' + decode_dict['sync'][accuracy_sync:] + '[' +
-                        decode_dict['sync'][0] + ']{0,' + str(accuracy_sync) + '}')
+        accuracy_sync = accuracy0 if sync_sign == 0 else accuracy1
+        decode_dict['sync'] = decode_dict['l0'] + sync_sign * (accuracy0/2+1) if sync_sign == '0' else decode_dict['l1'] + sync_sign * (accuracy1/2+1)
+        rs = re.compile(str(int(not int(decode_dict['sync'][0]))) + '+' + decode_dict['sync'] + '[' +
+                        decode_dict['sync'][0] + ']{0,}')
         packet = {}
         # Если в кодировании учавствует 3 вида сигнала, то 3 и 4 последоват. по кол-ву повторений
         # будут отличаться больше, чем в 2 раза (temp)
@@ -868,8 +862,8 @@ class Cc1101:
             packet['type'] = 'tmp'
         # Иначе в кодировании учавствует 4 вида сигнала
         else:
-            # Если 4 коротких сигнала, начиная с 0 идут подряд, то s0s1=0, s1s0=0, l0=1, l1=1 (livolo)
-            if decode_dict['s0'] + decode_dict['s1'] + decode_dict['s0'] + decode_dict['s1'] in b:
+            # Если 4 коротких сигнала идут подряд и байт синх. состоит из 1, то s0s1=0, s1s0=0, l0=1, l1=1 (livolo)
+            if decode_dict['sync'][0]=='1' and decode_dict['s0'] + decode_dict['s1'] + decode_dict['s0'] + decode_dict['s1'] in b:
                 # or (decode_dict['s0']+decode_dict['s1']+decode_dict['l0']+decode_dict['l1'] in b):
                 r0 = re.compile(decode_dict['s1'][
                                 accuracy1:] + '[1]{0,' + str(accuracy1 * 2) + '}' + decode_dict['s0'][
@@ -881,8 +875,7 @@ class Cc1101:
                                 accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}|' + decode_dict['l0'][
                                 accuracy0:] + '[0]{0,' + str(accuracy1 * 2) + '}' + decode_dict['l1'][
                                 accuracy1:] + '[1]{0,' + str(accuracy0 * 2) + '}')
-                rs = re.compile(decode_dict['sync'][accuracy_sync:] + '[' + decode_dict['sync'][0] + ']{0,' + str(
-                    accuracy_sync) + '}')
+                rs = re.compile(decode_dict['sync'][accuracy_sync:] + '[' + decode_dict['sync'][0] + ']{0,}')
                 packet['type'] = 'liv'
             else:
                 # предварительно считать 0 это s1l0(11100000000), 1 это l1s0(00000000111) (car,3state)
