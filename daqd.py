@@ -97,11 +97,12 @@ class Counter:
 
 
 class Sensor:
-    def __init__(self, id_, interface_id, enabled, count):
+    def __init__(self, id_, interface_id, enabled, count, action_id):
         try:
             self.id = id_
             self.interface_id = interface_id
             self.enabled = enabled
+            self.action_id=action_id
             cur = sql.cursor()
             self.command_list = ['enable', 'disable']
             if int(count):
@@ -320,8 +321,8 @@ def exec_control(value, conn):
         logging.error('daqd control: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
 
 
-def send2scada(value):
-    def xml_str(sensor_id, value, action_id):
+def send2scada2(value):
+    def xml_str(sensor_id, message, type):
         return '<?xml version="1.0" encoding="utf-8"?>\n<PACKAGE>\n<SENSOR sensor_id="' + str(
             sensor_id) + '" message="' + value + '" action_id="' + str(action_id) + '"/>\n</PACKAGE>'
 
@@ -366,6 +367,30 @@ def send2scada(value):
     except Exception, e:
         logging.error('send2scada: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
 
+def packet_identefy(packet):
+    for s in rf_sensors:
+        if re.match(rf_sensors[s]['message'],packet['message']):
+            packet['sensor_id'] = s
+            location = rf_sensors[s]['value_location'].split(':')
+            packet['value'] = packet['message'][int(location[0]):int(location[1])]
+            packet['action_id'] = rf_sensors[s]['action_id']
+            return packet
+    return packet
+
+def send2scada(packet):
+    def xml_str(packet):
+        return '<?xml version="1.0" encoding="utf-8"?>\n<PACKAGE>\n<SENSOR sensor_id="' + str(
+            packet['sensor_id']) + '" value="' + str(packet['value']) + '" action_id="' + str(packet['action_id']) + '"/>\n</PACKAGE>'
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(SOCKFILE_OUT)
+        sock.send(xml_str(packet))
+        sock.recv(sock_buffer)
+        sock.close()
+        logging.critical('send to OpenSCADA: s-' + str(packet['sensor_id']) + ' v-' + str(packet['value']) + ' a-' + str(packet['action_id']))
+    except Exception, e:
+        logging.error('OpenSCADA socket error: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
 
 class DaqdControlThread(threading.Thread):
     def __init__(self):
@@ -438,6 +463,13 @@ class Cc1101ComThread(threading.Thread):
         try:
             rf_modules[self.id].flush_rx()
             rf_modules[self.id].srx()
+            cur.execute("""
+                       SELECT sensor_id, message, type, value_location, action_id
+                       FROM daqd_interface_cc1101, daqd_sensors
+                       WHERE sensor_id=id
+                       """)
+            for row in cur:
+                rf_sensors[row[0]]={'message':row[1], 'type':row[2], 'value_location':row[3], 'action_id':row[4]}
             while self.running:
                 if not rf_modules[self.id].GDO0State:
                     rf_modules[self.id].gdo0_open()
@@ -448,10 +480,10 @@ class Cc1101ComThread(threading.Thread):
                         'cc1101(' + str(self.id) + ') communication: event file:' + str(fileno) + ' event:' + str(
                             event) + ' GDO0File:' + str(rf_modules[self.id].GDO0File.fileno()))
                     if fileno == rf_modules[self.id].GDO0File.fileno():
-                        data = rf_modules[self.id].read_buffer()
-                        if data:
-                            logging.debug('cc1101(' + str(self.id) + ') communication: receive: ' + data)
-                            daemon.queue_out.add(data)
+                        packet = rf_modules[self.id].read_buffer()
+                        if packet:
+                            logging.debug('cc1101(' + str(self.id) + ') communication: receive: ' + packet['type'] +':'+packet['message'])
+                            if packet['message']: daemon.queue_out.add(packet_identefy(packet))
                             rf_modules[self.id].flush_rx()
                             rf_modules[self.id].srx()
                         else:
@@ -463,8 +495,10 @@ class Cc1101ComThread(threading.Thread):
         except Exception, e:
             logging.error('cc1101(' + str(self.id) + ') communication: ' + str(e) + '\
 : line ' + str(sys.exc_info()[-1].tb_lineno))
-        rf_modules[self.id].reset()
-        logging.critical('cc1101(' + str(self.id) + ') communication: stop')
+        finally:
+            rf_modules[self.id].starting = False
+            rf_modules[self.id].reset()
+            logging.critical('cc1101(' + str(self.id) + ') communication: stop')
 
 
 # Для каждого включенного датчика gpio
@@ -528,7 +562,7 @@ edge:' + self.edge + ' counter:' + str(self.counter))
                         if fileno == gpio.fvalue.fileno():
                             # data=s_id+':'+str(gpio.value)
                             logging.debug('gpio communication: sensor ' + s_id + ' signal')
-                            daemon.queue_out.add(s_id)
+                            daemon.queue_out.add({'sensor_id':s_id,'value':1,'action_id':sensors[self.id].action_id})
         except Exception, e:
             logging.error('gpio communication: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
         finally:
@@ -593,11 +627,11 @@ if __name__ == "__main__":
             cur = sql.cursor()
             sensors = dict()
             cur.execute("""
-                        SELECT id, interface_id, enabled, counter 
+                        SELECT id, interface_id, enabled, counter, action_id 
                         FROM daqd_sensors
                         """)
             for row in cur:
-                sensors[row[0]] = Sensor(row[0], row[1], row[2], row[3])
+                sensors[row[0]] = Sensor(row[0], row[1], row[2], row[3], row[4])
             rf_modules = dict()
             cur.execute("""
                         SELECT id,config,rx 
@@ -605,6 +639,7 @@ if __name__ == "__main__":
                         """)
             for row in cur:
                 rf_modules[row[0]] = RfModule(row[0], row[1], row[2])
+            rf_sensors = {}
             daemon.start()
             # Основной поток должен остоваться, чтобы ловить сигнал SIGTERM
             while True:

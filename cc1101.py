@@ -836,25 +836,28 @@ class Cc1101:
         m_g0 = max(g0)
         m_g1 = max(g1)
         sync_sign = m_g0[0] if len(m_g0) > len(m_g1) else m_g1[0]
+        # Если в кодировании учавствует 3 вида сигнала, то 3 и 4 последоват. по кол-ву повторений
+        # будут отличаться больше, чем в 2 раза (temp)
+        signal_count = 3 if sorted_pack[-3][1] / float(sorted_pack[-4][1]) > 2 else 4
         # Из 4 чаще повторяющиехся послед. отобрать длинную 0(l0), короткую 0(s0), длинную 1(l1), короткую 1(s1) .
-        decode_dict['s0'] = min([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '0'])
-        decode_dict['l0'] = max([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '0'])
-        decode_dict['s1'] = min([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '1'])
-        decode_dict['l1'] = max([sorted_pack[i][0] for i in xrange(-4, 0) if sorted_pack[i][0][0] == '1'])
+        decode_dict['s0'] = min([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '0'])
+        decode_dict['l0'] = max([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '0'])
+        decode_dict['s1'] = min([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '1'])
+        decode_dict['l1'] = max([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '1'])
         # print decode_dict
         # Устанавливаем точность, что бы захватить сигналы ктр. длиннее или короче тех, ктр. чаще повторяются
+        # Только если разница между сигналами будет больше двух, иначе значения найдут друг на друга
         diff0 = len(decode_dict['l0']) - len(decode_dict['s0'])
         diff1 = len(decode_dict['l1']) - len(decode_dict['s1'])
-        accuracy0 = diff0 / 2 - 1 if diff0 > 1 else 0
-        accuracy1 = diff1 / 2 - 1 if diff1 > 1 else 0
+        accuracy0 = diff0 / 2 if diff0 > 2 else 0
+        accuracy1 = diff1 / 2 if diff1 > 2 else 0
         accuracy_sync = accuracy0 if sync_sign == 0 else accuracy1
-        decode_dict['sync'] = decode_dict['l0'] + sync_sign * (accuracy0/2+1) if sync_sign == '0' else decode_dict['l1'] + sync_sign * (accuracy1/2+1)
+        decode_dict['sync'] = decode_dict['l0'] + sync_sign * (accuracy0+1) if sync_sign == '0' else decode_dict['l1'] + sync_sign * (accuracy1+1)
         rs = re.compile(str(int(not int(decode_dict['sync'][0]))) + '+' + decode_dict['sync'] + '[' +
                         decode_dict['sync'][0] + ']{0,}')
         packet = {}
-        # Если в кодировании учавствует 3 вида сигнала, то 3 и 4 последоват. по кол-ву повторений
-        # будут отличаться больше, чем в 2 раза (temp)
-        if sorted_pack[-3][1] / float(sorted_pack[-4][1]) > 2:
+        # Если в кодировании учавствует 3 вида сигнала
+        if signal_count == 3:
             r0 = re.compile(
                 decode_dict['s1'][0] + '+' + decode_dict['s0'][accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}')
             r1 = re.compile(
@@ -862,7 +865,7 @@ class Cc1101:
             packet['type'] = 'tmp'
         # Иначе в кодировании учавствует 4 вида сигнала
         else:
-            # Если 4 коротких сигнала идут подряд и байт синх. состоит из 1, то s0s1=0, s1s0=0, l0=1, l1=1 (livolo)
+            # Если 4 коротких сигнала идут подряд и байт синх. состоит из единиц, то s0s1=0, s1s0=0, l0=1, l1=1 (livolo)
             if decode_dict['sync'][0]=='1' and decode_dict['s0'] + decode_dict['s1'] + decode_dict['s0'] + decode_dict['s1'] in b:
                 # or (decode_dict['s0']+decode_dict['s1']+decode_dict['l0']+decode_dict['l1'] in b):
                 r0 = re.compile(decode_dict['s1'][
@@ -872,9 +875,11 @@ class Cc1101:
                                 accuracy1:] + '[1]{0,' + str(accuracy0 * 2) + '}')
                 r1 = re.compile(decode_dict['l1'][
                                 accuracy1:] + '[1]{0,' + str(accuracy1 * 2) + '}|' + decode_dict['l0'][
-                                accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}|' + decode_dict['l0'][
-                                accuracy0:] + '[0]{0,' + str(accuracy1 * 2) + '}' + decode_dict['l1'][
-                                accuracy1:] + '[1]{0,' + str(accuracy0 * 2) + '}')
+                                accuracy0:] + '[0]{0,' + str(accuracy0 * 2) + '}')
+                                # не помню почему так????
+                                #|' + decode_dict['l0'][
+                                #accuracy0:] + '[0]{0,' + str(accuracy1 * 2) + '}' + decode_dict['l1'][
+                                #accuracy1:] + '[1]{0,' + str(accuracy0 * 2) + '}')
                 rs = re.compile(decode_dict['sync'][accuracy_sync:] + '[' + decode_dict['sync'][0] + ']{0,}')
                 packet['type'] = 'liv'
             else:
@@ -898,19 +903,21 @@ class Cc1101:
     @staticmethod
     def decode(b):
         packet = Cc1101.packet_code(Cc1101.human_bin(b))
+        packet['message'] = ''
 
         def toint(s):
             return str(int(s, 2))
 
         if packet['type'] == '4st':
-            packet['message'] = ''
             dict = {'00': '0', '11': '1', '01': 'f', '10': 'g'}
+            # Проверка на кратность 2
+            packet['code'] = packet['code'][:-1] if len(packet['code']) % 2 else packet['code']
             # Разделить весь код на список из двух символов и подставить в соответствие словарю
             for c in [packet['code'][x:x + 2] for x in range(0, len(packet['code']), 2)]:
                 packet['message'] += dict[c]
-        elif packet['type'] == 'liv':
-            packet['message'] = int(packet['code'][17:22], 2)
-        elif packet['type'] == 'tmp':
+        elif packet['type'] == 'liv' and len(packet['code'])==23:
+            packet['message'] = packet['code'] #int(packet['code'][17:22], 2)
+        elif packet['type'] == 'tmp' and len(packet['code'])==36:
             sign = int(packet['code'][16:17])
             # Если двоичный код температуры начинается с 1, то значение отрицательное(смотри "дополнительный код")
             if sign:
@@ -920,7 +927,10 @@ class Cc1101:
             packet['message'] = toint(packet['code'][0:4]) + ':' + toint(packet['code'][4:12]) + ':' + toint(
                 packet['code'][12:13]) + ':' + toint(packet['code'][13:14]) + ':' + toint(
                 packet['code'][14:16]) + ':' + str(round(t, 1)) + ':' + toint(packet['code'][28:36])
+        else:
+            packet['message'] = 'unknown'
         print packet['code']
+        print packet['type']
         print packet['message']
         return packet
 
