@@ -7,7 +7,6 @@ import spidev
 import time
 import fagpio
 
-
 # noinspection PyAttributeOutsideInit
 
 class Cc1101:
@@ -20,15 +19,15 @@ class Cc1101:
     packet_len = 1500
     livolo_packet_len = 1500
     read_threshold = 15
-    command_list = ['LivoloA',
-                    'LivoloB',
-                    'LivoloC',
-                    'LivoloD',
-                    'LivoloE',
-                    'LivoloH',
-                    'ButtonA',
-                    'ButtonC',
-                    'Marcstate',
+    command_list = ['livolo_a',
+                    'livolo_b',
+                    'livolo_c',
+                    'livolo_d',
+                    'livolo_e',
+                    'livolo_h',
+                    'button_a',
+                    'button_c',
+                    'marcstate',
                     ]
     # ------------------------------------------------------------------------------------------------------
     # CC1101 STROBE, CONTROL AND STATUS REGSITER
@@ -409,8 +408,8 @@ class Cc1101:
             'BSCFG': 0x1C,
             #        'AGCCTRL2':0x04,
             #        'AGCCTRL2':0xE3,    #empirical value
-            'AGCCTRL2': 0xE7,
-            'AGCCTRL1': 0x41,  # empirical value
+            'AGCCTRL2': 0xF8,
+            'AGCCTRL1': 0x40,  # empirical value
             'AGCCTRL0': 0x92,  # empirical value
             'WORCTRL': 0xFB,
             'FREND1': 0xB6,
@@ -632,6 +631,10 @@ class Cc1101:
     def marcstate(self):
         return self.Marcstate_reg[self.read_status('MARCSTATE')[1]]
 
+    @property
+    def rssi(self):
+        return self.rssi_dbm(self.read_status('RSSI')[1])
+
     def stx(self):
         self.strobe('STX')
         while self.marcstate() != 'TX':
@@ -663,42 +666,38 @@ class Cc1101:
         self.stx()
 
     def send2(self, buf):
-        try:
-            cur = 64
-            len_buffer = len(buf)
-            threshold = (len_buffer - (len_buffer % 64))
-            self.flush_tx()
-            self.write_burst_reg('TXFIFO', buf[0:64])
-            self.stx()
-            flag = True
-            while cur < len_buffer:
-                if cur > threshold and flag:
-                    self.write_reg('PKTCTRL0', 0x00)
-                    print("Turn to fixed packet length with threshold is %s" % threshold)
-                    flag = False
-                time.sleep(0.012)
-                sum_bytes = 64 - int(self.read_status('TXBYTES')[1], 16)
-                print(sum_bytes, cur)
-                if sum_bytes > 0:
-                    if (cur + sum_bytes) < len_buffer:
-                        self.write_burst_reg('TXFIFO', buf[cur:cur + sum_bytes])
-                    else:
-                        self.write_burst_reg('TXFIFO', buf[cur:len_buffer + 1])
-                        print(len_buffer - cur, len_buffer)
-                        # print(self.ReadStatus('MARCSTATE'))
-                        self.sidle()
-                        # print(self.ReadStatus('MARCSTATE'))
-                        break
+        cur = 64
+        len_buffer = len(buf)
+        threshold = (len_buffer - (len_buffer % 64))
+        self.flush_tx()
+        self.write_burst_reg('TXFIFO', buf[0:64])
+        self.stx()
+        flag = True
+        while cur < len_buffer:
+            if cur > threshold and flag:
+                self.write_reg('PKTCTRL0', 0x00)
+                print("Turn to fixed packet length with threshold is %s" % threshold)
+                flag = False
+            time.sleep(0.012)
+            sum_bytes = 64 - self.read_status('TXBYTES')[1]
+            print(sum_bytes, cur)
+            if sum_bytes > 0:
+                if (cur + sum_bytes) < len_buffer:
+                    self.write_burst_reg('TXFIFO', buf[cur:cur + sum_bytes])
                 else:
-                    self.flush_tx()
-                    self.stx()
-                    sum_bytes = 0
-                cur += sum_bytes
-            self.write_reg('PKTCTRL0', 0x02)
-            return True
-        except Exception, e:
-            print(str(e))
-            return False
+                    self.write_burst_reg('TXFIFO', buf[cur:len_buffer + 1])
+                    print(len_buffer - cur, len_buffer)
+                    # print(self.ReadStatus('MARCSTATE'))
+                    self.sidle()
+                    # print(self.ReadStatus('MARCSTATE'))
+                    break
+            else:
+                self.flush_tx()
+                self.stx()
+                sum_bytes = 0
+            cur += sum_bytes
+        self.write_reg('PKTCTRL0', 0x02)
+        return True
 
     def button_b(self):
         self.check_settings(3)
@@ -810,6 +809,7 @@ class Cc1101:
 
     @staticmethod
     def packet_code(b):
+        packet = {}
         # Найти все последовательности 0 и 1
         p0_r = re.compile('(0+)1')
         p1_r = re.compile('(1+)0')
@@ -833,17 +833,20 @@ class Cc1101:
         sorted_pack = sorted(sorted_pack, key=operator.itemgetter(1))
         print sorted_pack
         decode_dict = {}
-        m_g0 = max(g0)
-        m_g1 = max(g1)
-        sync_sign = m_g0[0] if len(m_g0) > len(m_g1) else m_g1[0]
-        # Если в кодировании учавствует 3 вида сигнала, то 3 и 4 последоват. по кол-ву повторений
-        # будут отличаться больше, чем в 2 раза (temp)
-        signal_count = 3 if sorted_pack[-3][1] / float(sorted_pack[-4][1]) > 2 else 4
-        # Из 4 чаще повторяющиехся послед. отобрать длинную 0(l0), короткую 0(s0), длинную 1(l1), короткую 1(s1) .
-        decode_dict['s0'] = min([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '0'])
-        decode_dict['l0'] = max([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '0'])
-        decode_dict['s1'] = min([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '1'])
-        decode_dict['l1'] = max([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '1'])
+        try:
+            m_g0 = max(g0)
+            m_g1 = max(g1)
+            sync_sign = m_g0[0] if len(m_g0) > len(m_g1) else m_g1[0]
+            # Если в кодировании учавствует 3 вида сигнала, то 3 и 4 последоват. по кол-ву повторений
+            # будут отличаться больше, чем в 2 раза (temp)
+            signal_count = 3 if sorted_pack[-3][1] / float(sorted_pack[-4][1]) > 2 else 4
+            # Из 4 чаще повторяющиехся послед. отобрать длинную 0(l0), короткую 0(s0), длинную 1(l1), короткую 1(s1) .
+            decode_dict['s0'] = min([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '0'])
+            decode_dict['l0'] = max([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '0'])
+            decode_dict['s1'] = min([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '1'])
+            decode_dict['l1'] = max([sorted_pack[i][0] for i in xrange(0 - signal_count, 0) if sorted_pack[i][0][0] == '1'])
+        except (ValueError, IndexError):
+            return False
         # print decode_dict
         # Устанавливаем точность, что бы захватить сигналы ктр. длиннее или короче тех, ктр. чаще повторяются
         # Только если разница между сигналами будет больше двух, иначе значения найдут друг на друга
@@ -855,7 +858,6 @@ class Cc1101:
         decode_dict['sync'] = decode_dict['l0'] + sync_sign * (accuracy0+1) if sync_sign == '0' else decode_dict['l1'] + sync_sign * (accuracy1+1)
         rs = re.compile(str(int(not int(decode_dict['sync'][0]))) + '+' + decode_dict['sync'] + '[' +
                         decode_dict['sync'][0] + ']{0,}')
-        packet = {}
         # Если в кодировании учавствует 3 вида сигнала
         if signal_count == 3:
             r0 = re.compile(
@@ -896,13 +898,17 @@ class Cc1101:
         # найти чаще всего повторяющиеся
         code_message = sorted([[x, group.count(x)] for x in set(group) if x], key=operator.itemgetter(1))
         print code_message
-        packet['code'] = code_message[-1][0].replace('o', '0').replace('l', '1')
+        try:
+            packet['code'] = code_message[-1][0].replace('o', '0').replace('l', '1')
+        except IndexError:
+            packet['code'] = ''
         # print message
         return packet
 
     @staticmethod
     def decode(b):
         packet = Cc1101.packet_code(Cc1101.human_bin(b))
+        if not packet: return False
         packet['message'] = ''
 
         def toint(s):
@@ -989,7 +995,7 @@ class Cc1101:
                 if less_count > self.read_threshold or status_byte >= 96:
                     # print buffer
                     self.flush_rx()
-                    self.gdo0_close()
+                    #self.gdo0_close()
                     # return self.PackSign(self.HumanBin(buffer))
                     # return self.BufferConvert(self.config)(buffer)
                     return self.decode(buf)
@@ -1011,11 +1017,8 @@ class Cc1101:
                 # print(events,self.GDO0File.fileno())
                 for fileno, event in events:
                     if fileno == self.GDO0File.fileno():
+                        print('RSSI: ' + str(self.rssi) + ' db')
                         print(time.ctime())
-                        self.RSSI = self.read_status('RSSI')[1]
-                        # print(self.RSSI)
-                        # print('RSSI: '+str(self.RssiDbm(int(self.RSSI,0)))+' db')
-                        print('RSSI: ' + str(self.rssi_dbm(self.RSSI)) + ' db')
                         return self.read_buffer()
 
         try:

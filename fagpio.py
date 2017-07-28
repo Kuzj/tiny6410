@@ -45,7 +45,7 @@ class gpio(object):
                 self.fvalue = open(gpio_path + self.name + '/value')
             if os.access(gpio_path + self.name + '/edge', os.W_OK):
                 self.epoll_obj = select.epoll()
-                self.epoll_obj.register(self.fvalue, select.EPOLLET)
+                self.epoll_obj.register(self.fvalue, select.EPOLLPRI | select.EPOLLET)
 
     def getactive(self):
         if os.access(gpio_path + self.name + '/active_low', os.R_OK):
@@ -95,7 +95,7 @@ class gpio(object):
                     self.fvalue = open(gpio_path + self.name + '/value', 'w+', 0)
                 if os.access(gpio_path + self.name + '/edge', os.W_OK) and val == 'in':
                     self.epoll_obj = select.epoll()
-                    self.epoll_obj.register(self.fvalue, select.EPOLLET)
+                    self.epoll_obj.register(self.fvalue, select.EPOLLPRI | select.EPOLLET)
                 return True
             else:
                 print('Access denied')

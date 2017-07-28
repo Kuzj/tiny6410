@@ -8,9 +8,12 @@ import socket
 import sqlite3
 import sys
 import threading
+import fagpio
+import time
+import re
 from os.path import isfile
 
-from cc1101 import *
+from cc1101 import Cc1101
 from daemon import Daemon
 
 PIDFILE = '/var/run/daqd/daqd.pid'
@@ -28,6 +31,14 @@ FORMAT = "%(asctime)-15s %(message)s"
 # logging.basicConfig(filename=LOGFILE,level=logging.WARNING,format=FORMAT)
 # logging.basicConfig(filename=LOGFILE,level=logging.INFO,format=FORMAT)
 
+def error_logger(decorated):
+    def decorator(*args, **kwargs):
+        try:
+            return decorated(*args, **kwargs)
+        except:
+            logging.critical("error in %s:", decorated.__name__, exc_info=True)
+    return decorator
+
 class Counter:
     def __init__(self, init_val, step, id_):
         self.save_value = init_val
@@ -41,52 +52,40 @@ class Counter:
         self.value += self.step
 
     def val_in_hour(self, t):
-        try:
+        if t>0 and self.step>0:
             return round(3600 / t * self.step, 3)
-        except ZeroDivisionError:
+        else:
             return 0
 
     def val_in_day(self, t):
-        try:
+        if t > 0 and self.step > 0:
             return round(3600 * 24 / t * self.step, 3)
-        except ZeroDivisionError:
+        else:
             return 0
 
     def period(self, t):
         self.vih = self.val_in_hour(t)
         self.vid = self.val_in_day(t)
 
+    @error_logger
     def save(self):
         if self.ischange():
-            try:
-                cur = sql.cursor()
-                cur.execute("""
-                            UPDATE daqd_sensors 
-                            SET count_value=? 
-                            WHERE id=?
-                            """, (str(self.value), str(self.id)))
-                sql.commit()
-                self.save_value = self.value
-                logging.debug('counter: save ' + str(self.id) + ' sensor counter value: ' + str(self.value))
-                return 0
-            except Exception, e:
-                logging.error('counter: error update count_value: ' + str(e) + '\
-: line ' + str(sys.exc_info()[-1].tb_lineno))
-                return 1
-        else:
-            return 4
+            cur = sql.cursor()
+            cur.execute("""
+                        UPDATE daqd_sensors 
+                        SET count_value=? 
+                        WHERE id=?
+                        """, (str(self.value), str(self.id)))
+            sql.commit()
+            self.save_value = self.value
+            logging.debug('counter: save ' + str(self.id) + ' sensor counter value: ' + str(self.value))
 
     def reset(self):
         self.value = 0
-        return 0
 
+    @error_logger
     def update(self, value=0):
-        try:
-            value = float(value)
-        except ValueError:
-            return 1
-        self.value = value
-        return 0
+        self.value = float(value)
 
     def ischange(self):
         if self.value != self.save_value:
@@ -95,79 +94,61 @@ class Counter:
     def join(self):
         return str(self.value) + ' ' + str(self.vih) + ' ' + str(self.vid)
 
-
 class Sensor:
+    @error_logger
     def __init__(self, id_, interface_id, enabled, count, action_id):
-        try:
-            self.id = id_
-            self.interface_id = interface_id
-            self.enabled = enabled
-            self.action_id=action_id
-            cur = sql.cursor()
-            self.command_list = ['enable', 'disable']
-            if int(count):
-                cur.execute("""
-                            SELECT count_value, count_step 
-                            FROM daqd_sensors 
-                            WHERE id=?
-                            """, str(self.id))
-                value, step = cur.fetchone()
-                self.counter = Counter(value, step, self.id)
-                self.save = self.counter.save
-                self.count = self.counter.join
-                self.reset = self.counter.reset
-                self.update = self.counter.update
-                self.command_list.extend(['count', 'reset', 'save', 'update'])
-            if self.isgpio():
-                cur.execute("""
-                            SELECT t.gpio_number,t.direction,t.active,e.value 
-                            FROM daqd_interface_gpio t, daqd_gpio_edge e 
-                            WHERE t.sensor_id=? AND t.edge_id=e.id
-                            """, str(self.id))
-                self.gpio = dict()
-                self.gpio['count'] = count
-                self.gpio['num'], self.gpio['dir'], self.gpio['act'], self.gpio['edge'] = cur.fetchone()
-                self.starting = False
-                self.command_list.extend(['start', 'stop'])
-        except Exception, e:
-            logging.error('sensor ' + str(self.id) + ' init error: ' + str(e) + '\
-: line ' + str(sys.exc_info()[-1].tb_lineno))
+        self.id = id_
+        self.interface_id = interface_id
+        self.enabled = enabled
+        self.action_id=action_id
+        cur = sql.cursor()
+        self.command_list = ['enable', 'disable']
+        if int(count):
+            cur.execute("""
+                        SELECT count_value, count_step 
+                        FROM daqd_sensors 
+                        WHERE id=?
+                        """, str(self.id))
+            value, step = cur.fetchone()
+            self.counter = Counter(value, step, self.id)
+            self.save = self.counter.save
+            self.count = self.counter.join
+            self.reset = self.counter.reset
+            self.update = self.counter.update
+            self.command_list.extend(['count', 'reset', 'save', 'update'])
+        if self.isgpio():
+            cur.execute("""
+                        SELECT t.gpio_number,t.direction,t.active,e.value 
+                        FROM daqd_interface_gpio t, daqd_gpio_edge e 
+                        WHERE t.sensor_id=? AND t.edge_id=e.id
+                        """, str(self.id))
+            self.gpio = dict()
+            self.gpio['count'] = count
+            self.gpio['num'], self.gpio['dir'], self.gpio['act'], self.gpio['edge'] = cur.fetchone()
+            self.starting = False
+            self.command_list.extend(['start', 'stop'])
 
+    @error_logger
     def enable(self):
         if not self.enabled:
-            try:
-                cur.execute("""
-                            UPDATE daqd_sensors 
-                            SET enabled=1 
-                            WHERE id=?
-                            """, str(self.id))
-                sql.commit()
-                self.enabled = 1
-                return 0
-            except Exception, e:
-                logging.error('sensor ' + str(self.id) + ' enable error: ' + str(e) + '\
-: line ' + str(sys.exc_info()[-1].tb_lineno))
-                return 1
-        else:
-            return 2
+            cur.execute("""
+                        UPDATE daqd_sensors 
+                        SET enabled=1 
+                        WHERE id=?
+                        """, str(self.id))
+            sql.commit()
+            self.enabled = 1
 
+    @error_logger
     def disable(self):
         if self.enabled:
-            try:
-                cur.execute("""
-                            UPDATE daqd_sensors 
-                            SET enabled=0 
-                            WHERE id=?
-                            """, str(self.id))
-                sql.commit()
-                self.enabled = 0
-                return 0
-            except Exception, e:
-                logging.error('sensor ' + str(self.id) + ' disable error: ' + str(e) + '\
-: line ' + str(sys.exc_info()[-1].tb_lineno))
-                return 1
-        else:
-            return 2
+            cur.execute("""
+                        UPDATE daqd_sensors 
+                        SET enabled=0 
+                        WHERE id=?
+                        """, str(self.id))
+            sql.commit()
+            self.enabled = 0
 
     def start(self):
         if not self.starting:
@@ -176,28 +157,22 @@ class Sensor:
                                             self.gpio['edge'], self.gpio['count'])
                 self.thread.start()
                 self.starting = True
-                return 0
             else:
                 logging.info('sensor ' + str(self.id) + ' disabled')
-                return 2
         else:
             logging.info('sensor ' + str(self.id) + ' thread already start')
-            return 3
 
     def stop(self):
         if self.starting:
             self.thread.stop()
             self.starting = False
-            return 0
         else:
             logging.info('sensor ' + str(self.id) + ' not starting')
-            return 3
 
     def isgpio(self):
         if int(self.interface_id) == 2:
             return True
         return False
-
 
 class RfModule(Cc1101):
     def __init__(self, id_, config, rx):
@@ -205,29 +180,26 @@ class RfModule(Cc1101):
         Cc1101.__init__(self, self.id)
         self.rx = rx
         self.config = config
-        self.thread = Cc1101ComThread(self.id)
+        #self.thread = Cc1101ComThread(self.id)
+        self.init(self.config)
         self.starting = False
 
     def start(self):
         if not self.starting:
-            self.init(self.config)
+            #Cc1101.__init__(self, self.id)
+            #self.init(self.config)
             self.thread = Cc1101ComThread(self.id)
             self.thread.start()
             self.starting = True
-            return 0
         else:
             logging.info('cc1101(' + str(self.id) + ') thread already start')
-            return 3
 
     def stop(self):
         if self.starting:
             self.thread.stop()
             self.starting = False
-            return 0
         else:
             logging.info('cc1101(' + str(self.id) + ') not starting')
-            return 3
-
 
 # Поток для очереди входящих(in) и исходящих(out) сообщений
 class QueueThread(threading.Thread):
@@ -249,7 +221,6 @@ class QueueThread(threading.Thread):
         while self.running:
             try:
                 value = self.q.get(block=True, timeout=1)
-                # logging.debug('queue "'+self.direction+'" size: '+str(self.q.qsize()))
                 if self.direction == 'out':
                     send2scada(value)
                 elif self.direction == 'in':
@@ -261,16 +232,26 @@ class QueueThread(threading.Thread):
             logging.warning('queue "' + self.direction + '": elements left in the queue')
             while not self.q.empty():
                 logging.warning('queue "' + self.direction + '": element in queue: ' + self.q.get())
-
-
+@error_logger
 def exec_control(value, conn):
+
+    def send(ans):
+        try:
+            conn.send(ans)
+        except IOError, e:
+            if e.errno == 32: #errno.EPIPE (Broken pipe)
+                logging.error('daqd control: broken pipe')
+                daemon.daqd_control.stop()
+                time.sleep(1)
+                daemon.daqd_control.start()
+
     def valid(value):
         data = value.split()
         try:
             data[0] = int(data[0])
         except ValueError:
             logging.error('daqd control: command format error')
-            conn.send('daqd control: command format error')
+            send('daqd control: command format error')
             return False
         if data.__len__() == 2:
             return data
@@ -280,117 +261,65 @@ def exec_control(value, conn):
                 return data
             except ValueError:
                 logging.error('daqd control: command format error')
-                conn.send('daqd control: command format error')
+                send('daqd control: command format error')
                 return False
         else:
             logging.error('daqd control: command format error')
-            conn.send('daqd control: command format error')
+            send('daqd control: command format error')
             return False
 
     # 100 это сс1101(0). 101 это cc1101(1)
-    try:
-        data = valid(value)
-        if data:
-            if data[0] in [100, 101]:
-                if (data[1] in Cc1101.command_list) or (data[1] in ['stop', 'start']):
-                    command = getattr(rf_modules[data[0] % 100], data[1])
-                    answer = command()
-                    if conn:
-                        conn.send(str(answer))
-                    logging.debug('daqd control: sensor ' + str(data[0]) + ' command: "' + data[1] + '"')
-                else:
-                    logging.error('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
-                    conn.send('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
-            elif data[0] in sensors.keys():
-                if data[1] in sensors[data[0]].command_list:
-                    command = getattr(sensors[data[0]], data[1])
-                    if data.__len__() == 2:
-                        answer = command()
-                    elif data.__len__() == 3:
-                        answer = command(data[2])
-                    if conn:
-                        conn.send(str(answer))
-                        logging.debug('daqd control: sensor ' + str(data[0]) + ' command: "' + data[1] + '"')
-                else:
-                    logging.error('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
-                    conn.send('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
+    data = valid(value)
+    if data:
+        if data[0] in [100, 101]:
+            if (data[1] in Cc1101.command_list) or (data[1] in ['stop', 'start']):
+                command = getattr(rf_modules[data[0] % 100], data[1])
+                answer = command()
+                send(str(answer))
+                logging.debug('daqd control: sensor ' + str(data[0]) + ' command: "' + data[1] + '"')
             else:
-                logging.error('daqd control: sensor ' + str(data[0]) + ' not found')
-                conn.send('daqd control: sensor ' + str(data[0]) + ' not found')
-    except Exception, e:
-        logging.error('daqd control: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
+                logging.error('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
+                send('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
+        elif data[0] in sensors.keys():
+            if data[1] in sensors[data[0]].command_list:
+                command = getattr(sensors[data[0]], data[1])
+                if data.__len__() == 2:
+                    answer = command()
+                elif data.__len__() == 3:
+                    answer = command(data[2])
+                send(str(answer))
+                logging.debug('daqd control: sensor ' + str(data[0]) + ' command: "' + data[1] + '"')
+            else:
+                logging.error('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
+                send('daqd control: sensor ' + str(data[0]) + ' command "' + data[1] + '" not found')
+        else:
+            logging.error('daqd control: sensor ' + str(data[0]) + ' not found')
+            send('daqd control: sensor ' + str(data[0]) + ' not found')
 
-
-def send2scada2(value):
-    def xml_str(sensor_id, message, type):
-        return '<?xml version="1.0" encoding="utf-8"?>\n<PACKAGE>\n<SENSOR sensor_id="' + str(
-            sensor_id) + '" message="' + value + '" action_id="' + str(action_id) + '"/>\n</PACKAGE>'
-
-    def send(sensor_id, value, action_id):
-        try:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(SOCKFILE_OUT)
-            sock.send(xml_str(sensor_id, value, action_id))
-            sock.recv(sock_buffer)
-            sock.close()
-            logging.debug('send to OpenSCADA: ' + str(sensor_id) + '|' + value + '|' + str(action_id))
-        except Exception, e:
-            logging.error('OpenSCADA socket error: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
-
-    try:
-        # Так как датчик может передовать только информацию, без опозновательных сигналов:
-        # Считать количество датчиков на одной настройке cc1101 
-        cur.execute("""
-                    SELECT count(*) 
-                    FROM daqd_interface_cc1101 
-                    WHERE config_num=?
-                    """, str(rf_modules[0].config))
-        count = cur.fetchone()[0]
-        # Если настройка cc1101 используется только для одного датчика, то брать sensor_id по номеру настройки
-        if count == 1:
-            cur.execute("""
-                        SELECT s.id, s.action_id 
-                        FROM daqd_sensors s, daqd_interface_cc1101 c 
-                        WHERE s.id=c.sensor_id AND c.config_num=?
-                        """, str(rf_modules[0].config))
-            sensor_id, action_id = cur.fetchone()
-            send(sensor_id, value, action_id)
-        # Если больше одного датчика используют одну настройку, то брать sensor_id по сообщению передоваемого датчиком 
-        elif count > 1:
-            cur.execute("""
-                        SELECT s.id, s.action_id 
-                        FROM daqd_sensors s, daqd_interface_cc1101 c 
-                        WHERE s.id=c.sensor_id AND c.message=? AND c.config_num=?
-                        """, (value, str(rf_modules[0].config)))
-            sensor_id, action_id = cur.fetchone()
-            send(sensor_id, value, action_id)
-    except Exception, e:
-        logging.error('send2scada: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
-
+@error_logger
 def packet_identefy(packet):
     for s in rf_sensors:
         if re.match(rf_sensors[s]['message'],packet['message']):
             packet['sensor_id'] = s
-            location = rf_sensors[s]['value_location'].split(':')
-            packet['value'] = packet['message'][int(location[0]):int(location[1])]
+            #location = rf_sensors[s]['value_location'].split(':')
+            #packet['value'] = packet['message'][int(location[0]):int(location[1])]
+            packet['value'] = re.search(rf_sensors[s]['value_location'],packet['message']).group(1)
             packet['action_id'] = rf_sensors[s]['action_id']
             return packet
-    return packet
+    return False
 
+@error_logger
 def send2scada(packet):
     def xml_str(packet):
         return '<?xml version="1.0" encoding="utf-8"?>\n<PACKAGE>\n<SENSOR sensor_id="' + str(
             packet['sensor_id']) + '" value="' + str(packet['value']) + '" action_id="' + str(packet['action_id']) + '"/>\n</PACKAGE>'
 
-    try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.connect(SOCKFILE_OUT)
-        sock.send(xml_str(packet))
-        sock.recv(sock_buffer)
-        sock.close()
-        logging.critical('send to OpenSCADA: s-' + str(packet['sensor_id']) + ' v-' + str(packet['value']) + ' a-' + str(packet['action_id']))
-    except Exception, e:
-        logging.error('OpenSCADA socket error: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(SOCKFILE_OUT)
+    sock.send(xml_str(packet))
+    sock.recv(sock_buffer)
+    sock.close()
+    logging.critical('send to OpenSCADA: s-' + str(packet['sensor_id']) + ' v-' + str(packet['value']) + ' a-' + str(packet['action_id']))
 
 class DaqdControlThread(threading.Thread):
     def __init__(self):
@@ -408,11 +337,8 @@ class DaqdControlThread(threading.Thread):
             os.remove(SOCKFILE)
         except OSError:
             pass
-        try:
-            sock.bind(SOCKFILE)
-            sock.listen(1)
-        except Exception, e:
-            logging.error('daqd control: socket error: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
+        sock.bind(SOCKFILE)
+        sock.listen(1)
         while self.running:
             try:
                 conn, addr = sock.accept()
@@ -420,30 +346,19 @@ class DaqdControlThread(threading.Thread):
             except socket.timeout:
                 # logging.debug('daqd control: socket timeout')
                 continue
-            except Exception, e:
-                logging.error('daqd control: socket error: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
-                break
             while self.running:
                 try:
                     data = conn.recv(sock_buffer)
                 except socket.timeout:
                     continue
-                except Exception, e:
-                    logging.error('daqd control: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
                 else:
                     if data:
                         logging.debug('daqd control: receive: ' + data)
                         # t = time.ctime()
                         # rez = ''
-                        try:
-                            daemon.queue_in.add(data, conn)
-                            logging.debug('daqd control: "' + data + '" in queue')
-                        except Exception, e:
-                            logging.error('daqd control: send error:' + str(e) + '\
-: line ' + str(sys.exc_info()[-1].tb_lineno))
-                            break
+                        daemon.queue_in.add(data, conn)
+                        logging.debug('daqd control: "' + data + '" in queue')
         logging.critical('daqd control: stop')
-
 
 # Прослушивание частоты настроенной на модуле CC1101
 # все что получено(data)(определяется функциями в зависимости
@@ -461,29 +376,32 @@ class Cc1101ComThread(threading.Thread):
     def run(self):
         logging.critical('cc1101(' + str(self.id) + ') communication: start')
         try:
-            rf_modules[self.id].flush_rx()
-            rf_modules[self.id].srx()
             cur.execute("""
-                       SELECT sensor_id, message, type, value_location, action_id
-                       FROM daqd_interface_cc1101, daqd_sensors
-                       WHERE sensor_id=id
-                       """)
+                     SELECT sensor_id, message, type, value_location, action_id
+                     FROM daqd_interface_cc1101, daqd_sensors
+                     WHERE sensor_id=id
+                     """)
             for row in cur:
                 rf_sensors[row[0]]={'message':row[1], 'type':row[2], 'value_location':row[3], 'action_id':row[4]}
+            rf_modules[self.id].flush_rx()
+            rf_modules[self.id].srx()
             while self.running:
                 if not rf_modules[self.id].GDO0State:
+                    logging.debug('gdo_open')
                     rf_modules[self.id].gdo0_open()
                 logging.debug('cc1101(' + str(self.id) + ') communication: before poll')
                 events = rf_modules[self.id].epoll_obj.poll(1)
                 for fileno, event in events:
-                    logging.debug(
-                        'cc1101(' + str(self.id) + ') communication: event file:' + str(fileno) + ' event:' + str(
-                            event) + ' GDO0File:' + str(rf_modules[self.id].GDO0File.fileno()))
                     if fileno == rf_modules[self.id].GDO0File.fileno():
+                        rssi=rf_modules[self.id].rssi
                         packet = rf_modules[self.id].read_buffer()
                         if packet:
-                            logging.debug('cc1101(' + str(self.id) + ') communication: receive: ' + packet['type'] +':'+packet['message'])
-                            if packet['message']: daemon.queue_out.add(packet_identefy(packet))
+                            packet['rssi']=rssi
+                            logging.critical('cc1101(' + str(self.id) + ') communication: receive: ' + packet['type'] +':'+packet['message']+':'+str(packet['rssi']))
+                            #if packet['message']: daemon.queue_out.add(packet_identefy(packet))
+                            id_packet=packet_identefy(packet)
+                            if id_packet: daemon.queue_out.add(id_packet)
+                            else: logging.critical('unknown packet')
                             rf_modules[self.id].flush_rx()
                             rf_modules[self.id].srx()
                         else:
@@ -493,8 +411,7 @@ class Cc1101ComThread(threading.Thread):
                     rf_modules[self.id].flush_rx()
                     rf_modules[self.id].srx()
         except Exception, e:
-            logging.error('cc1101(' + str(self.id) + ') communication: ' + str(e) + '\
-: line ' + str(sys.exc_info()[-1].tb_lineno))
+            logging.error('cc1101(' + str(self.id) + ') communication: ', exc_info=True)
         finally:
             rf_modules[self.id].starting = False
             rf_modules[self.id].reset()
@@ -564,33 +481,30 @@ edge:' + self.edge + ' counter:' + str(self.counter))
                             logging.debug('gpio communication: sensor ' + s_id + ' signal')
                             daemon.queue_out.add({'sensor_id':s_id,'value':1,'action_id':sensors[self.id].action_id})
         except Exception, e:
-            logging.error('gpio communication: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
+            logging.error('gpio communication: ', exc_info=True)
         finally:
             fagpio.unexport(self.gpio)
             sensors[self.id].starting = False
-            logging.critical('gpio communication: unexport ' + str(self.gpio) + ' gpio')
+            #logging.critical('gpio communication: unexport ' + str(self.gpio) + ' gpio')
             logging.critical('gpio communication: stop sensor:' + s_id + ' gpio:' + s_gpio + ' \
 edge:' + self.edge + ' counter:' + str(self.counter))
 
 
 class Daqd(Daemon):
+    @error_logger
     def run(self):
-        try:
-            self.queue_out = QueueThread('out')
-            self.queue_out.start()
-            self.queue_in = QueueThread('in')
-            self.queue_in.start()
-            self.daqd_control = DaqdControlThread()
-            self.daqd_control.start()
-            for s in sensors:
-                if sensors[s].enabled and sensors[s].isgpio():
-                    sensors[s].start()
-            for r in rf_modules:
-                if rf_modules[r].rx:
-                    rf_modules[r].start()
-        except Exception, e:
-            logging.error('daqd exception: ' + str(e) + ' : line ' + str(sys.exc_info()[-1].tb_lineno))
-
+        self.queue_out = QueueThread('out')
+        self.queue_out.start()
+        self.queue_in = QueueThread('in')
+        self.queue_in.start()
+        self.daqd_control = DaqdControlThread()
+        self.daqd_control.start()
+        for s in sensors:
+            if sensors[s].enabled and sensors[s].isgpio():
+                sensors[s].start()
+        for r in rf_modules:
+            if rf_modules[r].rx:
+                rf_modules[r].start()
 
 def sigterm_handler(signal, frame):
     global sql
@@ -608,7 +522,6 @@ def sigterm_handler(signal, frame):
         rf_modules[r].close()
     sql.close()
     sys.exit(0)
-
 
 if __name__ == "__main__":
     daemon = Daqd(PIDFILE)
